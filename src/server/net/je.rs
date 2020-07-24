@@ -5,10 +5,7 @@ use std::io::{Read, Write, Cursor};
 
 #[derive(Debug)]
 pub enum JeValError {
-    OversizedVarInt,
-    SocketRead(std::io::Error),
-    EmptySocket,
-    EndOfSocket
+    OversizedVarInt
 }
 
 #[derive(Debug)]
@@ -52,12 +49,23 @@ pub fn server_response_json(
 }
 
 pub fn read_from_je(stream: &mut std::net::TcpStream) -> (usize, i32, Vec<u8>) {
-    let len = var_int_to_int(stream).unwrap().0 as usize;
-    println!("rp_len {}", len);
-    let (id, id_len) = var_int_to_int(stream).unwrap();
-    let mut data = Vec::with_capacity(len - id_len);
-    stream.take(len as u64 - id_len as u64).read_to_end(&mut data);
-    (len, id, data)
+    let mut len_peek = [0u8; 5];
+    let len_peek_read = stream.peek(&mut len_peek).unwrap();
+    let (len, len_bytes_read) = var_int_to_int(&mut len_peek, len_peek_read).unwrap();
+
+    // advance stream by len_bytes_read
+    stream.take(len_bytes_read as u64);
+
+    let mut id_peek = [0u8; 5];
+    let id_peek_read = stream.peek(&mut len_peek).unwrap();
+    let (id, id_bytes_read) = var_int_to_int(&mut id_peek, id_peek_read).unwrap();
+
+    // advance stream by id_bytes_read
+    stream.take(id_bytes_read as u64);
+
+    let mut data = Vec::with_capacity(len as usize - id_bytes_read);
+    stream.take(len as u64 - id_bytes_read as u64).read_to_end(&mut data);
+    (len as usize, id, data)
 }
 
 pub fn write_to_je(stream: &mut std::net::TcpStream, packet_id: i32, msgs: Vec<JeNetVal>) {

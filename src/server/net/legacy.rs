@@ -2,31 +2,29 @@ use crate::*;
 use super::JeValError;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 
-pub fn var_int_to_int(stream: &mut std::net::TcpStream) -> Result<(i32, usize), JeValError> {
-    let mut _tmp = vec![0; 1];
-    match stream.peek(&mut _tmp) {
-        Ok(size) => {
-            if _tmp[0] == 0 {
-                Err(JeValError::EmptySocket)
-            } else {
-                let mut result: i32 = 0;
-                let mut byte = 0b1000_0000;
-                let mut cont = 1;
-                let mut iteration = 0;
-                while byte & 0b1000_0000 != 0 {
-                    println!("vi_i");
-                    byte = stream.read_u8().map_err(|e| JeValError::EndOfSocket)?;
-                    let masked_val = byte & 0b0111_1111;
-                    result = result | (((masked_val as i32) << (7 * iteration)) as i32);
-                    iteration += 1;
-                    if iteration > 5 {
-                        return Err(JeValError::OversizedVarInt);
-                    }
-                }
-                Ok((result, iteration))
+/// Convert a `VarInt` to an `i32`.
+/// Returns `(result, VarInt length)` or `JeValError`.
+/// Peek the stream to get an array, then call this function.
+pub fn var_int_to_int(val: &[u8; 5], read_len: usize) -> Result<(i32, usize), JeValError> {
+    if val[0] == 0 && read_len > 0 {
+        Ok((0, 1))
+    } else {
+        let mut result: i32 = 0;
+        let mut byte = 0b1000_0000;
+        let mut cont = 1;
+        let mut iteration = 0;
+        while byte & 0b1000_0000 != 0 {
+            byte = val[iteration];
+            let masked_val = byte & 0b0111_1111;
+            result = result | (((masked_val as i32) << (7 * iteration)) as i32);
+            iteration += 1;
+            if iteration > {
+                if read_len < 5 { read_len } else { 5 }
+            } {
+                return Err(JeValError::OversizedVarInt);
             }
-        },
-        Err(e) => Err(JeValError::SocketRead(e))
+        }
+        Ok((result, iteration))
     }
 }
 

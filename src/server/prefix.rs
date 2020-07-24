@@ -3,7 +3,7 @@ use std::error::Error;
 use crate::server::config::*;
 use toml::to_vec;
 
-pub struct ServerPrefix(PathBuf);
+pub struct ServerPrefix(pub PathBuf);
 
 impl ServerPrefix {
     /// Create a new prefix.

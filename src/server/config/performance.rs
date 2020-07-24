@@ -17,18 +17,17 @@ pub(crate) struct ConfigPerformance {
 
 impl Default for ConfigPerformance {
     fn default() -> Self {
-        ConfigPerformance {
-
-        }
+        todo!()
     }
 }
 
 impl ConfigValidator for ConfigPerformance {
     fn validate(&self) -> Vec<ValidatorInfo> {
-
+        todo!()
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct ConfigChunkPools {
     online_to_partial_scan_interval: Duration,
     online_to_partial_distance_max: u64,
@@ -40,6 +39,7 @@ pub struct ConfigChunkPools {
     suspended_to_offline_move_delay: Duration
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum PartialTickProcessingType {
     MobPassive,
     MobNeutral,

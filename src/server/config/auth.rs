@@ -6,5 +6,7 @@ pub(crate) struct ConfigAuth {
 }
 
 impl Default for ConfigAuth {
-    
+    fn default() -> Self {
+        todo!()
+    }
 }

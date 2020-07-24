@@ -6,5 +6,7 @@ pub(crate) struct ConfigCap {
 }
 
 impl Default for ConfigCap {
-    
+    fn default() -> Self {
+        todo!()
+    }
 }

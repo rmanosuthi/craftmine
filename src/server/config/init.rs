@@ -6,5 +6,7 @@ pub(crate) struct ConfigInit {
 }
 
 impl Default for ConfigInit {
-
+    fn default() -> Self {
+        todo!()
+    }
 }

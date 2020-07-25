@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct ConfigCap {
+pub struct ConfigCap {
 
 }
 

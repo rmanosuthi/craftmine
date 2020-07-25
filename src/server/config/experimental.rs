@@ -2,7 +2,7 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
 /// Experimental options based on Mumbo's video. Defaults to vanilla Minecraft behavior.
-pub(crate) struct ConfigExperimental {
+pub struct ConfigExperimental {
     /// Whether interacting with a bed will set the respawn point.
     pub bed_interact_set_respawn_point: bool,
     /// Whether sneaking on magma blocks will damage the player.

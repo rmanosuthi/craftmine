@@ -13,6 +13,7 @@ pub use self::network::*;
 pub use self::performance::*;
 
 use std::{path::PathBuf, error::Error};
+use crate::init_flags::ValidatedInitFlags;
 
 pub enum ValidatorInfo {
     Info(String),
@@ -24,6 +25,14 @@ pub trait ConfigValidator {
     fn validate(&self) -> Vec<ValidatorInfo>;
 }
 
-pub struct ConfigCollection {}
+pub struct ConfigCollection {
+    pub network: ConfigNetwork
+}
 
 pub struct ConfigFolder(pub PathBuf);
+
+impl ConfigFolder {
+    pub fn load_or_new_all(vf: &ValidatedInitFlags) -> Result<ConfigCollection, Vec<String>> {
+        todo!()
+    }
+}

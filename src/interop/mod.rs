@@ -1,2 +1,2 @@
 mod cli;
-pub(crate) use self::cli::*;
+pub use self::cli::*;

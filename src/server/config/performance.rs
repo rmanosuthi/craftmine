@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct ConfigPerformance {
+pub struct ConfigPerformance {
     pub view_distance_chunks: u64,
     pub items_dropped_gc: Option<Duration>,
     pub items_dropped_ttl: Duration,

@@ -1,7 +1,7 @@
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum CliMessageInbound {}
+pub enum CliMessageInbound {}
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum CliMessageOutbound {}
+pub enum CliMessageOutbound {}

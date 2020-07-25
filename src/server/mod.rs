@@ -9,13 +9,16 @@ pub mod config;
 mod game;
 mod prefix;
 
-pub(crate) use self::auth::*;
-pub(crate) use self::prefix::*;
-pub(crate) use self::game::GameServer;
+pub use self::auth::*;
+pub use self::prefix::*;
+pub use self::game::GameServer;
+use config::ConfigFolder;
+use world::WorldFolder;
+use game::AsyncNetInstance;
 pub struct ServerInitializer(pub InitFlags);
 
-pub(crate) type Termination = bool;
-pub(crate) type InteractionNeeded = bool;
+pub type Termination = bool;
+pub type InteractionNeeded = bool;
 
 mod net {
     mod je;
@@ -24,9 +27,25 @@ mod net {
     use self::legacy::*;
 }
 
+mod world {
+    use crate::*;
+    use uuid::Uuid;
+    use hashbrown::HashMap;
+    use server::game::GameWorld;
+
+    pub mod chunk;
+    pub mod generator;
+    pub struct WorldFolder {}
+    impl WorldFolder {
+        pub fn load_or_default(vf: &ValidatedInitFlags) -> Result<HashMap<Uuid, GameWorld>, Vec<String>> {
+            todo!()
+        }
+    }
+}
+
 impl ServerInitializer {
     pub fn start(&self) -> ServerInitResult {
-        let flags = self.0;
+        let flags = &self.0;
         let mut infos = Vec::new();
         let mut warns = Vec::new();
         let mut errs = Vec::new();
@@ -34,13 +53,13 @@ impl ServerInitializer {
         // TODO Check init flags valid
         let validated_flags_maybe = flags.to_validated();
 
-        if let Err(e) = validated_flags_maybe {
+        if let Err(mut e) = validated_flags_maybe.clone() {
             errs.append(&mut e);
         }
 
         if errs.is_empty() {
             // can safely unwrap validated_flags
-            let validated_flags = validated_flags_maybe.unwrap();
+            let validated_flags = validated_flags_maybe.unwrap().clone();
 
             // Check ports bindable
             if let Err(_) = TcpListener::bind(
@@ -60,7 +79,7 @@ impl ServerInitializer {
             };
 
             // Check configs exist and valid
-            let cc_maybe = match ConfigFolder::load_or_new_all() {
+            let cc_maybe = match ConfigFolder::load_or_new_all(&validated_flags) {
                 Ok(cc) => Some(cc),
                 Err(errors) => {
                     for e in errors {
@@ -71,7 +90,7 @@ impl ServerInitializer {
             };
 
             // Check worlds
-            let worlds_maybe = match WorldFolder::load_or_default() {
+            let worlds_maybe = match WorldFolder::load_or_default(&validated_flags) {
                 Ok(worlds) => Some(worlds),
                 Err(errors) => {
                     for e in errors {
@@ -82,22 +101,28 @@ impl ServerInitializer {
             };
 
             if errs.is_empty() {
+                let cc = cc_maybe.unwrap();
+                let async_net_instance = AsyncNetInstance::new(validated_flags.clone(), &cc);
+
+                let (cli_send, gs_cli_recv) = crossbeam::unbounded();
+                let (gs_cli_send, cli_recv) = crossbeam::unbounded();
+
+                let web_ws = cc.network.web_addr_port.clone();
                 let instance = GameServer {
-                    prefix: ServerPrefix(validated_flags.prefix.0),
-                    init_flags: validated_flags,
+                    prefix: ServerPrefix(validated_flags.prefix.0.clone()),
+                    init_flags: validated_flags.clone(),
                     worlds: worlds_maybe.unwrap(),
-                    net_send,
-                    net_recv,
                     cli_recv: gs_cli_recv,
                     cli_send: gs_cli_send,
-                    async_net_instance
+                    async_net_instance,
+                    cc
                 };
                 ServerInitResult {
                     instance: if errs.is_empty() {
                         Ok((instance, ServerInitChannels {
                             cli_recv: cli_recv,
                             cli_send: cli_send,
-                            web_ws: web_addr
+                            web_ws
                         }))
                     } else {
                         Err(errs)

@@ -1,8 +1,9 @@
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct ConfigNetwork {
-
+pub struct ConfigNetwork {
+    pub sync_async_channel_len: usize,
+    pub web_addr_port: String
 }
 
 impl Default for ConfigNetwork {

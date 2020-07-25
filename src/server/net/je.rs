@@ -1,7 +1,8 @@
 use uuid::Uuid;
 use super::{int_to_var_int, var_int_to_int};
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Read, Write, Cursor};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::{error::Error, io::{Read, Write, Cursor}};
+use futures::future::poll_fn;
 
 #[derive(Debug)]
 pub enum JeValError {
@@ -48,27 +49,27 @@ pub fn server_response_json(
     result
 }
 
-pub fn read_from_je(stream: &mut std::net::TcpStream) -> (usize, i32, Vec<u8>) {
+pub async fn read_from_je(stream: &mut tokio::net::TcpStream) -> Result<(usize, i32, Vec<u8>), Box<dyn Error>> {
     let mut len_peek = [0u8; 5];
-    let len_peek_read = stream.peek(&mut len_peek).unwrap();
+    let len_peek_read = stream.peek(&mut len_peek).await?;
     let (len, len_bytes_read) = var_int_to_int(&mut len_peek, len_peek_read).unwrap();
 
     // advance stream by len_bytes_read
-    stream.take(len_bytes_read as u64);
+    stream.take(len_bytes_read as u64).read(&mut len_peek).await?;
 
     let mut id_peek = [0u8; 5];
-    let id_peek_read = stream.peek(&mut len_peek).unwrap();
+    let id_peek_read = stream.peek(&mut id_peek).await?;
     let (id, id_bytes_read) = var_int_to_int(&mut id_peek, id_peek_read).unwrap();
 
     // advance stream by id_bytes_read
-    stream.take(id_bytes_read as u64);
+    stream.take(id_bytes_read as u64).read(&mut id_peek).await?;
 
     let mut data = Vec::with_capacity(len as usize - id_bytes_read);
-    stream.take(len as u64 - id_bytes_read as u64).read_to_end(&mut data);
-    (len as usize, id, data)
+    stream.take(len as u64 - id_bytes_read as u64).read_to_end(&mut data).await?;
+    Ok((len as usize, id, data))
 }
 
-pub fn write_to_je(stream: &mut std::net::TcpStream, packet_id: i32, msgs: Vec<JeNetVal>) {
+pub async fn write_to_je(stream: &mut tokio::net::TcpStream, packet_id: i32, msgs: &[JeNetVal]) -> Result<usize, Box<dyn Error>> {
     let packet_id_varint = int_to_var_int(packet_id).unwrap();
     let len_msgs: i32 = msgs.iter().map(|e| e.size()).sum();
     let buf: Vec<u8> = [
@@ -78,7 +79,7 @@ pub fn write_to_je(stream: &mut std::net::TcpStream, packet_id: i32, msgs: Vec<J
     ].iter().flatten().map(|e| *e).collect();
     println!("== WRITE TO JE ==");
     println!("{:?}", &buf);
-    stream.write(&buf);
+    stream.write(&buf).await.map_err(|e| e.into())
 }
 
 pub enum JeNetVal {

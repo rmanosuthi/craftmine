@@ -1,4 +1,5 @@
 use crate::server::net::*;
+use std::error::Error;
 
 // JE login process
 /**
@@ -34,17 +35,33 @@ use crate::server::net::*;
     rsa-priv -> rsa-keypair -> send der-rsa-pub
 **/
 
-pub fn try_login(stream: &mut std::net::TcpStream, privkey: &[u8], pubkey: &[u8]) -> Result<JeSession, JeLoginError> {
-    let (len, packet_id, data) = read_from_je(&mut stream);
+pub async fn try_login(stream: &mut tokio::net::TcpStream, privkey: &[u8], pubkey: &[u8]) -> Result<JeSession, JeLoginError> {
+    let (len, packet_id, data) = read_from_je(stream).await.map_err(|e| JeLoginError::Internal(e))?;
     if packet_id != 0x00 {
-        Err(JeLoginError::PacketError)
+        return Err(JeLoginError::PacketError);
     }
+
+    // TODO vtoken
+    let vtoken = vec![0; 4];
+
     let username = jestring_to_string(&data);
-    write_to_je(&mut stream, 0x01, vec![
+    write_to_je(stream, 0x01, &[
         JeNetVal::String("".to_owned()),
         JeNetVal::VarInt(pubkey.len() as i32),
         JeNetVal::Array(pubkey.to_owned()),
         JeNetVal::VarInt(4),
         JeNetVal::Array(vtoken)
-    ]);
+    ]).await.map_err(|e| JeLoginError::Internal(e))?;
+    Ok(JeSession {})
+}
+
+pub enum JeLoginError {
+    PacketError,
+    Internal(Box<dyn Error>)
+}
+
+pub struct JeSession {}
+
+pub fn jestring_to_string(data: &[u8]) -> String {
+    todo!()
 }

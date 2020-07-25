@@ -59,7 +59,7 @@ impl<'a> DirOrFile<'a> {
                     Err(e) => Some(ServerPrefixError::IoError(e))
                 }));
                 children.iter().for_each(|child| {
-                    child.recursive_write(&path, &mut result);
+                    child.recursive_write(&path, result);
                 });
                 return;
             },
@@ -82,7 +82,7 @@ impl<'a> DirOrFile<'a> {
                         return;
                     },
                     Err(e) => {
-                        result.push((path.clone(), Some(ServerPrefixError::TomlError(*e))));
+                        result.push((path.clone(), Some(ServerPrefixError::TomlError(e.clone()))));
                         return;
                     }
                 }
@@ -92,8 +92,14 @@ impl<'a> DirOrFile<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) enum ServerPrefixError {
+pub enum ServerPrefixError {
     AlreadyExists,
     IoError(std::io::Error),
     TomlError(toml::ser::Error)
+}
+
+impl ToString for ServerPrefixError {
+    fn to_string(&self) -> String {
+        todo!()
+    }
 }

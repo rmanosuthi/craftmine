@@ -37,8 +37,9 @@ mod world {
     pub mod generator;
     pub struct WorldFolder {}
     impl WorldFolder {
+        // TODO actually implement
         pub fn load_or_default(vf: &ValidatedInitFlags) -> Result<HashMap<Uuid, GameWorld>, Vec<String>> {
-            todo!()
+            Ok(HashMap::new())
         }
     }
 }
@@ -59,7 +60,22 @@ impl ServerInitializer {
 
         if errs.is_empty() {
             // can safely unwrap validated_flags
-            let validated_flags = validated_flags_maybe.unwrap().clone();
+            let mut validated_flags = validated_flags_maybe.unwrap().clone();
+
+            info!("Startup args validated");
+            debug!("Validated flags {:?}", &validated_flags);
+
+            infos.append(&mut validated_flags.prefix.1);
+            infos.append(&mut validated_flags.config_path.1);
+            infos.append(&mut validated_flags.je_port.1);
+            infos.append(&mut validated_flags.be_port.1);
+            infos.append(&mut validated_flags.bind_addr.1);
+
+            let mut prefix_errors = validated_flags.try_create_prefix();
+
+            if prefix_errors.len() != 0 {
+                errs.append(&mut prefix_errors);
+            }
 
             // Check ports bindable
             if let Err(_) = TcpListener::bind(
@@ -68,7 +84,9 @@ impl ServerInitializer {
                 errs.push(
                     format!("Failed to bind to JE port {}", validated_flags.je_port.0)
                 )
-            };
+            } else {
+                infos.push(format!("JE: port {} available", validated_flags.je_port.0));
+            }
 
             if let Err(_) = TcpListener::bind(
                 format!("127.0.0.1:{}", validated_flags.be_port.0)
@@ -76,7 +94,9 @@ impl ServerInitializer {
                 errs.push(
                     format!("Failed to bind to BE port {}", validated_flags.be_port.0)
                 )
-            };
+            } else {
+                infos.push(format!("BE: port {} available", validated_flags.be_port.0));
+            }
 
             // Check configs exist and valid
             let cc_maybe = match ConfigFolder::load_or_new_all(&validated_flags) {
@@ -102,12 +122,16 @@ impl ServerInitializer {
 
             if errs.is_empty() {
                 let cc = cc_maybe.unwrap();
-                let async_net_instance = AsyncNetInstance::new(validated_flags.clone(), &cc);
+                let async_net_instance = AsyncNetInstance::new(validated_flags.clone(), cc.clone());
 
                 let (cli_send, gs_cli_recv) = crossbeam::unbounded();
                 let (gs_cli_send, cli_recv) = crossbeam::unbounded();
 
-                let web_ws = cc.network.web_addr_port.clone();
+                let web_ws = cc.net.web_addr_port.clone();
+
+                let sra = SrAllocator::new(&cc);
+                sra.report();
+
                 let instance = GameServer {
                     prefix: ServerPrefix(validated_flags.prefix.0.clone()),
                     init_flags: validated_flags.clone(),
@@ -149,9 +173,9 @@ impl ServerInitializer {
 }
 
 pub struct ServerInitResult {
-    instance: Result<(GameServer, ServerInitChannels), Vec<String>>,
-    warn: Vec<(String, InteractionNeeded)>,
-    info: Vec<String>
+    pub instance: Result<(GameServer, ServerInitChannels), Vec<String>>,
+    pub warn: Vec<(String, InteractionNeeded)>,
+    pub info: Vec<String>
 }
 
 pub struct ServerInitChannels {

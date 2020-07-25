@@ -1,7 +1,7 @@
 use uuid::Uuid;
 use super::{int_to_var_int, var_int_to_int};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::{error::Error, io::{Read, Write, Cursor}};
+use std::{error::Error, io::{Read, Write, Cursor}, convert::TryFrom};
 use futures::future::poll_fn;
 
 #[derive(Debug)]
@@ -50,16 +50,29 @@ pub fn server_response_json(
 }
 
 pub async fn read_from_je(stream: &mut tokio::net::TcpStream) -> Result<(usize, i32, Vec<u8>), Box<dyn Error>> {
+    let mut poll_test = [0u8; 1];
+    poll_fn(|cx| {
+        stream.poll_peek(cx, &mut poll_test)
+    }).await?;
     let mut len_peek = [0u8; 5];
     let len_peek_read = stream.peek(&mut len_peek).await?;
-    let (len, len_bytes_read) = var_int_to_int(&mut len_peek, len_peek_read).unwrap();
+    let (len, len_bytes_read) = match var_int_to_int(&mut len_peek, len_peek_read) {
+        Ok(tup) => tup,
+        Err(_) => (0, 9999)
+    };
+
+    if len_bytes_read == 9999 {
+        // error parsing varint
+        stream.take(1).read_exact(&mut poll_test).await?;
+        return Err("VARINTERR".into())
+    }
 
     // advance stream by len_bytes_read
     stream.take(len_bytes_read as u64).read(&mut len_peek).await?;
 
     let mut id_peek = [0u8; 5];
     let id_peek_read = stream.peek(&mut id_peek).await?;
-    let (id, id_bytes_read) = var_int_to_int(&mut id_peek, id_peek_read).unwrap();
+    let (id, id_bytes_read) = var_int_to_int(&mut id_peek, id_peek_read)?;
 
     // advance stream by id_bytes_read
     stream.take(id_bytes_read as u64).read(&mut id_peek).await?;
@@ -77,9 +90,13 @@ pub async fn write_to_je(stream: &mut tokio::net::TcpStream, packet_id: i32, msg
         int_to_var_int(packet_id).unwrap(),
         msgs.iter().map(|e| e.to_vec_u8()).flatten().collect()
     ].iter().flatten().map(|e| *e).collect();
-    println!("== WRITE TO JE ==");
-    println!("{:?}", &buf);
     stream.write(&buf).await.map_err(|e| e.into())
+}
+
+pub async fn je_kick(stream: &mut tokio::net::TcpStream, reason: Box<dyn Error>) {
+    write_to_je(stream, 0x1b, &[
+        JeNetVal::Chat(format!("{}", reason))
+    ]).await;
 }
 
 pub enum JeNetVal {
@@ -129,4 +146,63 @@ impl JeNetVal {
             _ => unimplemented!()
         }
     }
+}
+
+pub enum JeNetType {
+    Boolean,
+    Byte,
+    UByte,
+    Short,
+    UShort,
+    Int,
+    Long,
+    Float,
+    Double,
+    String,
+    Chat,
+    Identifier,
+    VarInt,
+    VarLong,
+    Array
+}
+
+// TODO CHECK CHECK CHECK HUGE SECURITY RISK
+pub fn parse_je_data(data_len: usize, data: &[u8], type_hints: &[JeNetType]) -> Result<Vec<JeNetVal>, JePacketError> {
+    todo!()
+}
+
+pub enum JePacketError {
+    OversizedData(usize, usize),
+    UndersizedData(usize, usize),
+    InvalidFieldContent(JeNetType)
+}
+
+pub struct JePacketHandshake {}
+
+impl TryFrom<&[u8]> for JePacketHandshake {
+    type Error = Box<dyn Error>;
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        // TODO replace parse_je_data(0 <--
+        /*let packet_maybe = parse_je_data(0, &packet_data, &[
+            JeNetType::VarInt,
+            JeNetType::String,
+            JeNetType::UShort,
+            JeNetType::VarInt
+        ]);
+        match fields_maybe {
+            Ok(fields) => {
+                if let JeNetVal::VarInt(protocol_ver) = fields[0] &&
+                let JeNetVal::String(server_addr) = fields[1] &&
+                let JeNetVal::UShort(server_port) = fields[2] &&
+                let JeNetVal::VarInt(next_state) = fields[3] {
+    
+                }
+            },
+            Err(e) => {
+    
+            }
+        }*/
+        todo!()
+    }
+    
 }

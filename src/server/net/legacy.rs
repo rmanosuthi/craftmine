@@ -1,11 +1,12 @@
 use crate::*;
 use super::JeValError;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::error::Error;
 
 /// Convert a `VarInt` to an `i32`.
 /// Returns `(result, VarInt length)` or `JeValError`.
 /// Peek the stream to get an array, then call this function.
-pub fn var_int_to_int(val: &[u8; 5], read_len: usize) -> Result<(i32, usize), JeValError> {
+pub fn var_int_to_int(val: &[u8; 5], read_len: usize) -> Result<(i32, usize), Box<dyn Error>> {
     if val[0] == 0 && read_len > 0 {
         Ok((0, 1))
     } else {
@@ -21,7 +22,7 @@ pub fn var_int_to_int(val: &[u8; 5], read_len: usize) -> Result<(i32, usize), Je
             if iteration > {
                 if read_len < 5 { read_len } else { 5 }
             } {
-                return Err(JeValError::OversizedVarInt);
+                return Err("Invalid VarInt".into());
             }
         }
         Ok((result, iteration))
@@ -29,11 +30,9 @@ pub fn var_int_to_int(val: &[u8; 5], read_len: usize) -> Result<(i32, usize), Je
 }
 
 pub fn int_to_var_int(val: i32) -> Result<Vec<u8>, JeValError> {
-    println!("== WRITE VARINT {} ==", val);
     let mut val = val;
     let mut buf = Vec::new();
     if val == 0 {
-        println!("W VARINT {}", 0);
         buf.push(0);
     } else {
         while val != 0 {
@@ -42,7 +41,6 @@ pub fn int_to_var_int(val: i32) -> Result<Vec<u8>, JeValError> {
             if val != 0 {
                 temp = temp | 0b1000_0000;
             }
-            println!("W VARINT {}", temp);
             buf.push(temp);
         }
     }

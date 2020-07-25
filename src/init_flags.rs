@@ -28,7 +28,7 @@ pub struct InitFlags {
 
 /// Validated init flags.
 /// Values are "validated" in the sense that they are present. They are not necessary *correct*, for example, a path may not point to an existing file.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ValidatedInitFlags {
     pub prefix: (PathBuf, Vec<String>),
     pub config_path: (PathBuf, Vec<String>),
@@ -88,7 +88,10 @@ impl ValidatedInitFlags {
     }
     pub fn try_create_prefix(&self) -> Vec<String> {
         ServerPrefix::new_no_override(&self.prefix.0).1.iter().map(|tup| match &tup.1 {
-            Some(a) => Some(a.to_string()),
+            Some(a) => Some(
+                format!("Prefix error: At {:?}\n\t{}", tup.0, 
+                a.to_string())
+            ),
             None => None
         }).filter_map(|err| err).collect()
     }

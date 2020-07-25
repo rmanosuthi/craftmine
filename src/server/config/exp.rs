@@ -1,8 +1,9 @@
 use serde::{Serialize, Deserialize};
+use super::ConfigFile;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 /// Experimental options based on Mumbo's video. Defaults to vanilla Minecraft behavior.
-pub struct ConfigExperimental {
+pub struct ConfigExp {
     /// Whether interacting with a bed will set the respawn point.
     pub bed_interact_set_respawn_point: bool,
     /// Whether sneaking on magma blocks will damage the player.
@@ -28,7 +29,7 @@ pub struct ConfigExperimental {
     pub piston_push_containers: bool
 }
 
-impl Default for ConfigExperimental {
+impl Default for ConfigExp {
     fn default() -> Self {
         Self {
             bed_interact_set_respawn_point: false,
@@ -43,5 +44,11 @@ impl Default for ConfigExperimental {
             beacon_deny_mob_spawn_radius: None,
             piston_push_containers: false
         }
+    }
+}
+
+impl ConfigFile for ConfigExp {
+    fn get_filename() -> &'static str {
+        "experimental.json"
     }
 }

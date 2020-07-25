@@ -22,15 +22,8 @@ impl ServerPrefix {
     }
     fn init_folders(path: &Path) -> Vec<(PathBuf, Option<ServerPrefixError>)> {
         [
+            DirOrFile::Dir("", vec![]),
             DirOrFile::Dir("worlds", vec![]),
-            DirOrFile::Dir("config", vec![
-                DirOrFile::File("init.toml", toml::to_vec(&ConfigInit::default())),
-                DirOrFile::File("network.toml", toml::to_vec(&ConfigNetwork::default())),
-                DirOrFile::File("performance.toml", toml::to_vec(&ConfigPerformance::default())),
-                DirOrFile::File("experimental.toml", toml::to_vec(&ConfigExperimental::default())),
-                DirOrFile::File("auth.toml", toml::to_vec(&ConfigAuth::default())),
-                DirOrFile::File("cap.toml", toml::to_vec(&ConfigCap::default())),
-            ]),
             DirOrFile::Dir("users", vec![])
         ].iter().map(|dir_or_file| {
             let mut local_result = Vec::new();
@@ -46,7 +39,7 @@ impl ServerPrefix {
 enum DirOrFile<'a> {
     Dir(&'a str, Vec<DirOrFile<'a>>),
     EmptyFile(&'a str),
-    File(&'a str, Result<Vec<u8>, toml::ser::Error>)
+    File(&'a str, Result<Vec<u8>, Box<dyn Error>>)
 }
 
 impl<'a> DirOrFile<'a> {
@@ -56,7 +49,10 @@ impl<'a> DirOrFile<'a> {
                 let path: PathBuf = [full_path, &PathBuf::from(dir_name)].iter().collect();
                 result.push((path.clone(), match std::fs::create_dir(&path) {
                     Ok(_) => None,
-                    Err(e) => Some(ServerPrefixError::IoError(e))
+                    Err(e) => match e.kind() {
+                        std::io::ErrorKind::AlreadyExists => None,
+                        _ => Some(ServerPrefixError::IoError(e))
+                    }
                 }));
                 children.iter().for_each(|child| {
                     child.recursive_write(&path, result);
@@ -67,7 +63,10 @@ impl<'a> DirOrFile<'a> {
                 let path: PathBuf = [full_path, &PathBuf::from(empty_file)].iter().collect();
                 result.push((path.clone(), match std::fs::write(path, vec![]) {
                     Ok(_) => None,
-                    Err(e) => Some(ServerPrefixError::IoError(e))
+                    Err(e) => match e.kind() {
+                        std::io::ErrorKind::AlreadyExists => None,
+                        _ => Some(ServerPrefixError::IoError(e))
+                    }
                 }));
                 return;
             },
@@ -77,12 +76,19 @@ impl<'a> DirOrFile<'a> {
                     Ok(content) => {
                         result.push((path.clone(), match std::fs::write(path, content) {
                             Ok(_) => None,
-                            Err(e) => Some(ServerPrefixError::IoError(e))
+                            Err(e) => match e.kind() {
+                                std::io::ErrorKind::AlreadyExists => None,
+                                _ => Some(ServerPrefixError::IoError(e))
+                            }
                         }));
                         return;
                     },
                     Err(e) => {
-                        result.push((path.clone(), Some(ServerPrefixError::TomlError(e.clone()))));
+                        result.push((path.clone(),
+                            Some(ServerPrefixError::GenericError(
+                                e.to_string()
+                            ))
+                        ));
                         return;
                     }
                 }
@@ -95,11 +101,15 @@ impl<'a> DirOrFile<'a> {
 pub enum ServerPrefixError {
     AlreadyExists,
     IoError(std::io::Error),
-    TomlError(toml::ser::Error)
+    GenericError(String)
 }
 
 impl ToString for ServerPrefixError {
     fn to_string(&self) -> String {
-        todo!()
+        match &self {
+            ServerPrefixError::AlreadyExists => "already exists".to_owned(),
+            ServerPrefixError::IoError(e) => format!("IO error - {:?}", e),
+            ServerPrefixError::GenericError(e) => format!("Generic error - {}", e)
+        }
     }
 }

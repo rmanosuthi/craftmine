@@ -1,7 +1,7 @@
 use uuid::Uuid;
 use super::{int_to_var_int, var_int_to_int};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::{error::Error, io::{Read, Write, Cursor}, convert::TryFrom};
+use std::{error::Error, io::{Read, Write, Cursor, Seek, SeekFrom}, convert::TryFrom};
 use futures::future::poll_fn;
 
 #[derive(Debug)]
@@ -146,8 +146,87 @@ impl JeNetVal {
             _ => unimplemented!()
         }
     }
+    // TODO finish implementation
+    pub fn try_from_je_type(data: &[u8], at: usize, type_hint: &JeNetType) -> Result<(Self, usize), ()> {
+        let mut cursor = Cursor::new(data.split_at(at).1);
+        match type_hint {
+            JeNetType::Boolean => {
+                match byteorder::ReadBytesExt::read_u8(&mut cursor) {
+                    Ok(1) => Ok((JeNetVal::Boolean(true), type_hint.size().unwrap())),
+                    Ok(0) => Ok((JeNetVal::Boolean(false), type_hint.size().unwrap())),
+                    Ok(_) | Err(_) => Err(())
+                }
+            },
+            JeNetType::Byte => {
+                match byteorder::ReadBytesExt::read_i8(&mut cursor) {
+                    Ok(val) => Ok((JeNetVal::Byte(val), type_hint.size().unwrap())),
+                    Err(_) => Err(())
+                }
+            },
+            JeNetType::UByte => {
+                match byteorder::ReadBytesExt::read_u8(&mut cursor) {
+                    Ok(val) => Ok((JeNetVal::UByte(val), type_hint.size().unwrap())),
+                    Err(_) => Err(())
+                }
+            },
+            JeNetType::Short => {
+                match byteorder::ReadBytesExt::read_i16::<byteorder::NetworkEndian>(&mut cursor) {
+                    Ok(val) => Ok((JeNetVal::Short(val), type_hint.size().unwrap())),
+                    Err(_) => Err(())
+                }
+            },
+            JeNetType::UShort => {
+                match byteorder::ReadBytesExt::read_u16::<byteorder::NetworkEndian>(&mut cursor) {
+                    Ok(val) => Ok((JeNetVal::UShort(val), type_hint.size().unwrap())),
+                    Err(_) => Err(())
+                }
+            },
+            JeNetType::Int => {
+                match byteorder::ReadBytesExt::read_i32::<byteorder::NetworkEndian>(&mut cursor) {
+                    Ok(val) => Ok((JeNetVal::Int(val), type_hint.size().unwrap())),
+                    Err(_) => Err(())
+                }
+            },
+            JeNetType::Long => {
+                match byteorder::ReadBytesExt::read_i64::<byteorder::NetworkEndian>(&mut cursor) {
+                    Ok(val) => Ok((JeNetVal::Long(val), type_hint.size().unwrap())),
+                    Err(_) => Err(())
+                }
+            },
+            JeNetType::Float => {
+                match byteorder::ReadBytesExt::read_f32::<byteorder::NetworkEndian>(&mut cursor) {
+                    Ok(val) => Ok((JeNetVal::Float(val), type_hint.size().unwrap())),
+                    Err(_) => Err(())
+                }
+            },
+            JeNetType::Double => {
+                match byteorder::ReadBytesExt::read_f64::<byteorder::NetworkEndian>(&mut cursor) {
+                    Ok(val) => Ok((JeNetVal::Double(val), type_hint.size().unwrap())),
+                    Err(_) => Err(())
+                }
+            },
+            JeNetType::String => {
+                // scan varint
+                let (fp, sp) = data.split_at(at);
+                let (str_len, varint_len) = var_int_to_int(std::io::Read::take(cursor, 5).clone().into(), sp.len()).map_err(|_| ())?;
+                cursor.seek(SeekFrom::Current(varint_len as i64)).map_err(|_| ())?;
+                let mut try_string = Vec::new();
+                let str_read = std::io::Read::take(cursor, str_len as u64).read_to_end(&mut try_string).map_err(|_| ())?;
+                if str_read != str_len as usize {
+                    return Err(());
+                }
+                //try_string.reverse();
+                match String::from_utf8(try_string) {
+                    Ok(string) => Ok((JeNetVal::String(string), varint_len + str_read)),
+                    Err(_) => Err(())
+                }
+            }
+            _ => Err(())
+        }
+    }
 }
 
+#[derive(Copy, Clone)]
 pub enum JeNetType {
     Boolean,
     Byte,
@@ -166,9 +245,37 @@ pub enum JeNetType {
     Array
 }
 
+impl JeNetType {
+    pub fn size(&self) -> Option<usize> {
+        match self {
+            JeNetType::Boolean | JeNetType::Byte | JeNetType::UByte => Some(1),
+            JeNetType::Short | JeNetType::UShort => Some(2),
+            JeNetType::Int | JeNetType::Float => Some(4),
+            JeNetType::Long | JeNetType::Double => Some(8),
+            JeNetType::String | JeNetType::Chat | JeNetType::Identifier => None,
+            JeNetType::VarInt | JeNetType::VarLong | JeNetType::Array => None
+        }
+    }
+}
+
 // TODO CHECK CHECK CHECK HUGE SECURITY RISK
+/// Parses a je packet byte array to a rust format.
+/// This function and its callees need special attention due to their security sensitive nature.
+/// The iterator will terminate as soon as an `Err` is yield, which is intended.
 pub fn parse_je_data(data_len: usize, data: &[u8], type_hints: &[JeNetType]) -> Result<Vec<JeNetVal>, JePacketError> {
-    todo!()
+    type_hints.iter().scan(0, |counter, type_hint| {
+        Some(match JeNetVal::try_from_je_type(data, *counter, type_hint){
+            Ok((val, len)) => {
+                *counter += len;
+                if *counter < data_len {
+                    Ok(val)
+                } else {
+                    Err(JePacketError::OversizedData(*counter, data_len))
+                }
+            },
+            Err(_) => Err(JePacketError::InvalidFieldContent(*type_hint))
+        })
+    }).collect()
 }
 
 pub enum JePacketError {

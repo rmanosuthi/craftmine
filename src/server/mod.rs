@@ -33,7 +33,6 @@ mod world {
     use hashbrown::HashMap;
     use server::game::GameWorld;
 
-    pub mod chunk;
     pub mod generator;
     pub struct WorldFolder {}
     impl WorldFolder {

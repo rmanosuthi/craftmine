@@ -49,13 +49,13 @@ pub fn server_response_json(
     result
 }
 
-pub async fn read_from_je(stream: &mut tokio::net::TcpStream) -> Result<(usize, i32, Vec<u8>), Box<dyn Error>> {
+pub async fn read_from_je(stream: &mut tokio::net::TcpStream) -> Result<(usize, i32, Vec<u8>), ()> {
     let mut poll_test = [0u8; 1];
     poll_fn(|cx| {
         stream.poll_peek(cx, &mut poll_test)
-    }).await?;
+    }).await.map_err(|_| ())?;
     let mut len_peek = [0u8; 5];
-    let len_peek_read = stream.peek(&mut len_peek).await?;
+    let len_peek_read = stream.peek(&mut len_peek).await.map_err(|_| ())?;
     let (len, len_bytes_read) = match var_int_to_int(&mut len_peek, len_peek_read) {
         Ok(tup) => tup,
         Err(_) => (0, 9999)
@@ -63,22 +63,22 @@ pub async fn read_from_je(stream: &mut tokio::net::TcpStream) -> Result<(usize, 
 
     if len_bytes_read == 9999 {
         // error parsing varint
-        stream.take(1).read_exact(&mut poll_test).await?;
-        return Err("VARINTERR".into())
+        stream.take(1).read_exact(&mut poll_test).await.map_err(|_| ())?;
+        return Err(())
     }
 
     // advance stream by len_bytes_read
-    stream.take(len_bytes_read as u64).read(&mut len_peek).await?;
+    stream.take(len_bytes_read as u64).read(&mut len_peek).await.map_err(|_| ())?;
 
     let mut id_peek = [0u8; 5];
-    let id_peek_read = stream.peek(&mut id_peek).await?;
-    let (id, id_bytes_read) = var_int_to_int(&mut id_peek, id_peek_read)?;
+    let id_peek_read = stream.peek(&mut id_peek).await.map_err(|_| ())?;
+    let (id, id_bytes_read) = var_int_to_int(&mut id_peek, id_peek_read).map_err(|_| ())?;
 
     // advance stream by id_bytes_read
-    stream.take(id_bytes_read as u64).read(&mut id_peek).await?;
+    stream.take(id_bytes_read as u64).read(&mut id_peek).await.map_err(|_| ())?;
 
     let mut data = Vec::with_capacity(len as usize - id_bytes_read);
-    stream.take(len as u64 - id_bytes_read as u64).read_to_end(&mut data).await?;
+    stream.take(len as u64 - id_bytes_read as u64).read_to_end(&mut data).await.map_err(|_| ())?;
     Ok((len as usize, id, data))
 }
 
@@ -115,7 +115,8 @@ pub enum JeNetVal {
     Identifier(String),
     VarInt(i32),
     VarLong(i64),
-    Array(Vec<u8>)
+    Array(Vec<u8>),
+    FixedString(String, usize)
 }
 
 impl JeNetVal {
@@ -131,6 +132,9 @@ impl JeNetVal {
             JeNetVal::VarInt(vi) => int_to_var_int(*vi).unwrap().len() as i32,
             JeNetVal::VarLong(vl) => unimplemented!(),
             JeNetVal::Array(vec) => vec.len() as i32,
+            JeNetVal::FixedString(s, l) => {
+                int_to_var_int(s.len() as i32).unwrap().len() as i32 + *l as i32
+            },
             _ => unimplemented!(),
         }
     }
@@ -144,6 +148,29 @@ impl JeNetVal {
                 s.as_bytes().to_owned()].iter().flatten().map(|e| *e).collect()
             },
             JeNetVal::Array(vec) => vec.clone(),
+            JeNetVal::Float(v) => v.to_be_bytes().to_vec(),
+            JeNetVal::Double(v) => v.to_be_bytes().to_vec(),
+            JeNetVal::UByte(v) => v.to_be_bytes().to_vec(),
+            JeNetVal::Byte(v) => v.to_be_bytes().to_vec(),
+            JeNetVal::Int(v) => v.to_be_bytes().to_vec(),
+            JeNetVal::Long(v) => v.to_be_bytes().to_vec(),
+            JeNetVal::Short(v) => v.to_be_bytes().to_vec(),
+            JeNetVal::Boolean(v) => {
+                if *v {[0b1].to_vec()} else {[0b0].to_vec()}
+            },
+            JeNetVal::FixedString(v, l) => {
+                let mut s_w = v.as_bytes().to_owned();
+                let pad_target = *l - s_w.len();
+                info!("padding target {}", pad_target);
+                s_w.truncate(*l);
+                [
+                    int_to_var_int(*l as i32).unwrap(),
+                    if pad_target != 0 {
+                        vec![0u8; pad_target]
+                    } else {vec![]},
+                    s_w
+                ].iter().flatten().map(|e| *e).collect()
+            }
             _ => unimplemented!()
         }
     }

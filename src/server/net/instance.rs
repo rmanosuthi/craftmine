@@ -5,6 +5,8 @@ use super::*;
 use std::net::Shutdown;
 use hashbrown::HashMap;
 use tokio::future::poll_fn;
+use std::sync::Arc;
+use uuid::Uuid;
 
 pub enum NetSendMsg {}
 
@@ -26,6 +28,7 @@ impl AsyncNetInstance {
         let (async_send, ani_recv) = crossbeam::unbounded();
         let vf = vf.clone();
         let cc = Box::leak(Box::new(cc)) as &'static ConfigCollection;
+        let rsa_keypair = Box::leak(Box::new(openssl::rsa::Rsa::generate(1024).unwrap())) as &'static openssl::rsa::Rsa<_>;
         let rt_handle = std::thread::spawn(move || {
             rt.block_on(async move {
                 let mut async_recv = async_recv;
@@ -41,7 +44,6 @@ impl AsyncNetInstance {
                             tokio::task::spawn(async move {
                                 // TODO timeout
                                 let mut je_client = stream;
-                                let mut addr = addr;
                                 let mut state: i32 = 0;
                                 let mut last_seen = tokio::time::Instant::now();
                                 info!("New JE client from {}", &addr);
@@ -74,7 +76,7 @@ impl AsyncNetInstance {
                                                                     debug!("{:?}", try_handshake_packet);
                                                                     match try_handshake_packet {
                                                                         Ok(mut packet) => {
-                                                                            let pk_handshake_maybe = JePacketHandshake::try_raw(&mut packet);
+                                                                            let pk_handshake_maybe = JePacketHandshake::try_raw(&packet);
                                                                             debug!("{:?}", &pk_handshake_maybe);
                                                                             if let Ok(pk_handshake) = pk_handshake_maybe {
                                                                                 state = pk_handshake.next_state;
@@ -88,12 +90,110 @@ impl AsyncNetInstance {
                                                                         }
                                                                     }
                                                                 }
+                                                                1 => {
+                                                                    // reply
+                                                                    debug!("@{} <<< query meta", &addr);
+                                                                    write_to_je(&mut je_client, 0x00, &[JeNetVal::String(server_response_json(
+                                                                        "CM TEST",
+                                                                        578,
+                                                                        20,
+                                                                        0,
+                                                                        &[],
+                                                                        "CraftMine Test Server",
+                                                                        ""
+                                                                    ))]).await;
+                                                                }
+                                                                2 => {
+                                                                    let try_pk_login = parse_je_data(packet_data.len(), &packet_data, &[
+                                                                        JeNetType::String
+                                                                    ]).unwrap();
+                                                                    debug!("{:?}", try_pk_login);
+                                                                    if let Ok(pk_login_start) = JeLoginStart::try_raw(&try_pk_login) {
+                                                                        debug!("try_pk_login_raw ok");
+                                                                        if cc.auth.online_mode {
+                                                                            let pubkey = rsa_keypair.public_key_to_der().unwrap();
+                                                                            // TODO randomly generate vtoken instead
+                                                                            let vtoken = vec![0u8, 1u8, 2u8, 3u8];
+                                                                            // send enc request
+                                                                            debug!("Sending enc request");
+                                                                            write_to_je(&mut je_client, 0x01, &[
+                                                                                JeNetVal::String("".to_owned()),
+                                                                                JeNetVal::VarInt(pubkey.len() as i32),
+                                                                                JeNetVal::Array(pubkey),
+                                                                                JeNetVal::VarInt(vtoken.len() as i32),
+                                                                                JeNetVal::Array(vtoken.clone())
+                                                                            ]).await;
+                                                                        } else {
+                                                                            debug!("@{} OFFLINE MODE LOGIN", &addr);
+                                                                            debug!("sending login success");
+                                                                            write_to_je(&mut je_client, 0x02, &[
+                                                                                JeNetVal::String("550e8400-e29b-41d4-a716-446655440000".to_owned()),
+                                                                                JeNetVal::String(pk_login_start.name.clone())
+                                                                            ]).await;
+                                                                            state = 3;
+
+                                                                            // join game
+                                                                            write_to_je(&mut je_client, 0x26, &[
+                                                                                JeNetVal::Int(0x01000000),  // eid
+                                                                                JeNetVal::UByte(0x1),       // gamemode
+                                                                                JeNetVal::Int(0),           // dimension
+                                                                                JeNetVal::Long(0x0),        // hashed seed
+                                                                                JeNetVal::UByte(20),        // max players
+                                                                                JeNetVal::String("flat".to_owned()),    // level type
+                                                                                JeNetVal::VarInt(8),        // view distance
+                                                                                JeNetVal::Boolean(false),   // reduced debug
+                                                                                JeNetVal::Boolean(false)    // enable respawn
+
+                                                                            ]).await;
+                                                                            // initial play state
+                                                                            /*debug!("sending initial play state");
+                                                                            write_to_je(&mut je_client, 0x00, &[
+                                                                                JeNetVal::VarInt(0),
+                                                                                JeNetVal::Array(Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap().as_bytes().to_vec()),
+                                                                                JeNetVal::VarInt(106),
+                                                                                JeNetVal::Double(0.0f64),
+                                                                                JeNetVal::Double(0.0f64),
+                                                                                JeNetVal::Double(0.0f64),
+                                                                                JeNetVal::UByte(0),
+                                                                                JeNetVal::UByte(0),
+                                                                                JeNetVal::Int(0), // data
+                                                                                JeNetVal::Short(0),
+                                                                                JeNetVal::Short(0),
+                                                                                JeNetVal::Short(0)
+                                                                            ]).await;*/
+                                                                            // ignore client stuff for now
+                                                                            // held item change
+                                                                            write_to_je(&mut je_client, 0x40, &[
+                                                                                JeNetVal::Byte(0)
+                                                                            ]).await;
+                                                                            // spawn position
+                                                                            write_to_je(&mut je_client, 0x4e, &[
+                                                                                JeNetVal::Long(0)
+                                                                            ]).await;
+                                                                            // player position and look
+                                                                            write_to_je(&mut je_client, 0x36, &[
+                                                                                JeNetVal::Double(0f64),
+                                                                                JeNetVal::Double(0f64),
+                                                                                JeNetVal::Double(0f64),
+                                                                                JeNetVal::Float(0.0f32),
+                                                                                JeNetVal::Float(0.0f32),
+                                                                                JeNetVal::UByte(0),
+                                                                                JeNetVal::VarInt(1)
+                                                                            ]).await;
+                                                                        }
+                                                                    } else {
+                                                                        debug!("DE login start err");
+                                                                    }
+                                                                }
+                                                                3 => {
+                                                                    debug!("play state");
+                                                                }
                                                                 _ => {
                                                                     debug!("unknown state");
                                                                 }
                                                             }
                                                         },
-                                                        Err(e) => {
+                                                        Err(_) => {
                                                             debug!("DE: @{} malformed packet, skipping", &addr);
 
                                                         }

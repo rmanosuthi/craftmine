@@ -22,6 +22,8 @@ tokio = { version = "0.2", features = ["full"] }
 futures = "0.3"
 sysinfo = "0.15"
 num_cpus = "1.13"
+ring = "0.16"
+openssl = "*"
 
 [features]
 web = []

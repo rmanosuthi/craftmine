@@ -3,7 +3,7 @@ use std::any::Any;
 use serde::{Serialize, Deserialize};
 
 pub trait JePacket: Sized {
-    fn try_raw(from: &mut Vec<JeNetVal>) -> Result<Self, ()>;
+    fn try_raw(from: &[JeNetVal]) -> Result<Self, ()>;
 }
 
 /// Declare packet macro.
@@ -18,12 +18,15 @@ macro_rules! declare_packet {
         }
 
         impl JePacket for $name {
-            fn try_raw(from: &mut Vec<JeNetVal>) -> Result<Self, ()> {
+            fn try_raw(from: &[JeNetVal]) -> Result<Self, ()> {
                 let mut result: $name = unsafe {
-                    std::mem::MaybeUninit::uninit().assume_init()
+                    std::mem::MaybeUninit::zeroed().assume_init()
                 };
+                let mut counter = 0;
                     $(
-                        match from.remove(0).clone() {
+                        info!("Iteration {}", counter);
+                        //debug!("target downcast {:?}", std::any::TypeId::of<$field_type>());
+                        match from.get(counter).unwrap().to_owned() {
                             JeNetVal::Boolean(b) => {
                                 let b = &b as &dyn Any;
                                 result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
@@ -83,8 +86,10 @@ macro_rules! declare_packet {
                             JeNetVal::Array(b) => {
                                 let b = &b as &dyn Any;
                                 result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            }
+                            },
+                            _ => unimplemented!()
                         }
+                        counter += 1;
                     )*
                 Ok(result)
             }
@@ -97,4 +102,8 @@ declare_packet!(struct JePacketHandshake {
     server_addr: String,
     server_port: u16,
     next_state: i32,
+});
+
+declare_packet!(struct JeLoginStart {
+    name: String,
 });

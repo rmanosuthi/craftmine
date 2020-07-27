@@ -15,7 +15,7 @@ pub use self::interop::*;
 pub use self::init_flags::*;
 pub use self::server::*;
 use tokio::runtime;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use env_logger::fmt::{Color, Style};
 use log::Level;
 use sysinfo::{DiskExt, NetworkExt, NetworksExt, ProcessorExt, SystemExt};
@@ -30,7 +30,8 @@ fn main() {
         let elasped = start_inst.elapsed();
         let mut style = f.style();
         style.set_bold(true);
-        writeln!(f, "[{:12.6}] {} {}", elasped.as_secs_f32(), match r.level() {
+        writeln!(f, "[{:12.6}] {} {}", elasped.as_secs_f32(),
+        match r.level() {
             Level::Error => {
                 style.set_color(Color::Red);
                 style.value("E")
@@ -74,6 +75,27 @@ fn main() {
                     "RELEASE"
                 }
             });
+            let (stdin_send, stdin_recv) = crossbeam::unbounded();
+            let stdin = std::io::stdin();
+            std::thread::spawn(move || {
+                
+
+                let mut stdin_lock = stdin.lock();
+                for line in stdin_lock.lines() {
+                    stdin_send.send(line.unwrap());
+                }
+            });
+            
+            loop {
+                crossbeam::channel::select! {
+                    recv(stdin_recv) -> in_line => {
+                        debug!("stdin {}", in_line.unwrap());
+                    },
+                    recv(gs.cli_recv) -> gs_cli_msg => {
+
+                    }
+                }
+            }
         },
         Err(errors) => {
             for err in errors {

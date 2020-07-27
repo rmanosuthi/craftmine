@@ -35,7 +35,7 @@ use std::error::Error;
     rsa-priv -> rsa-keypair -> send der-rsa-pub
 **/
 
-pub async fn try_login(stream: &mut tokio::net::TcpStream, privkey: &[u8], pubkey: &[u8]) -> Result<JeSession, JeLoginError> {
+/*pub async fn try_login(stream: &mut tokio::net::TcpStream, privkey: &[u8], pubkey: &[u8]) -> Result<JeSession, JeLoginError> {
     let (len, packet_id, data) = read_from_je(stream).await.map_err(|e| JeLoginError::Internal(e))?;
     if packet_id != 0x00 {
         return Err(JeLoginError::PacketError);
@@ -53,14 +53,36 @@ pub async fn try_login(stream: &mut tokio::net::TcpStream, privkey: &[u8], pubke
         JeNetVal::Array(vtoken)
     ]).await.map_err(|e| JeLoginError::Internal(e))?;
     Ok(JeSession {})
-}
+}*/
 
 pub enum JeLoginError {
     PacketError,
     Internal(Box<dyn Error>)
 }
 
-pub struct JeSession {}
+pub struct JeConnectionState {
+    state: u8,
+    enc: Option<JeSessionEncrypt>,
+    status: JeConnectionStatus
+}
+
+impl Default for JeConnectionState {
+    fn default() -> Self {
+        Self {
+            state: 0,
+            enc: None,
+            status: JeConnectionStatus::Unauthenticated
+        }
+    }
+}
+
+pub enum JeConnectionStatus {
+    Unauthenticated,
+    Offline {},
+    Online
+}
+
+pub struct JeSessionEncrypt {}
 
 pub fn jestring_to_string(data: &[u8]) -> String {
     todo!()

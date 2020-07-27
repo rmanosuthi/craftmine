@@ -99,6 +99,7 @@ pub async fn je_kick(stream: &mut tokio::net::TcpStream, reason: Box<dyn Error>)
     ]).await;
 }
 
+#[derive(Debug, Clone)]
 pub enum JeNetVal {
     Boolean(bool),
     Byte(i8),
@@ -208,7 +209,7 @@ impl JeNetVal {
             JeNetType::String => {
                 // scan varint
                 let (fp, sp) = data.split_at(at);
-                let (str_len, varint_len) = var_int_to_int(std::io::Read::take(cursor, 5).clone().into(), sp.len()).map_err(|_| ())?;
+                let (str_len, varint_len) = var_int_to_int(sp, sp.len()).map_err(|_| ())?;
                 cursor.seek(SeekFrom::Current(varint_len as i64)).map_err(|_| ())?;
                 let mut try_string = Vec::new();
                 let str_read = std::io::Read::take(cursor, str_len as u64).read_to_end(&mut try_string).map_err(|_| ())?;
@@ -220,13 +221,25 @@ impl JeNetVal {
                     Ok(string) => Ok((JeNetVal::String(string), varint_len + str_read)),
                     Err(_) => Err(())
                 }
+            },
+            JeNetType::VarInt => {
+                let (_, sp) = data.split_at(at);
+                match var_int_to_int(sp, sp.len()) {
+                    Ok((varint, read_len)) => {
+                        Ok((JeNetVal::VarInt(varint), read_len))
+                    },
+                    Err(_) => Err(())
+                }
+            },
+            o_t => {
+                error!("Parsing {:?} not implemented yet", o_t);
+                Err(())
             }
-            _ => Err(())
         }
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum JeNetType {
     Boolean,
     Byte,
@@ -267,7 +280,7 @@ pub fn parse_je_data(data_len: usize, data: &[u8], type_hints: &[JeNetType]) -> 
         Some(match JeNetVal::try_from_je_type(data, *counter, type_hint){
             Ok((val, len)) => {
                 *counter += len;
-                if *counter < data_len {
+                if *counter <= data_len {
                     Ok(val)
                 } else {
                     Err(JePacketError::OversizedData(*counter, data_len))
@@ -278,15 +291,14 @@ pub fn parse_je_data(data_len: usize, data: &[u8], type_hints: &[JeNetType]) -> 
     }).collect()
 }
 
+#[derive(Debug)]
 pub enum JePacketError {
     OversizedData(usize, usize),
     UndersizedData(usize, usize),
     InvalidFieldContent(JeNetType)
 }
 
-pub struct JePacketHandshake {}
-
-impl TryFrom<&[u8]> for JePacketHandshake {
+/*impl TryFrom<&[u8]> for JePacketHandshake {
     type Error = Box<dyn Error>;
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         // TODO replace parse_je_data(0 <--
@@ -312,4 +324,4 @@ impl TryFrom<&[u8]> for JePacketHandshake {
         todo!()
     }
     
-}
+}*/

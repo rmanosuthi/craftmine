@@ -6,7 +6,10 @@ use std::error::Error;
 /// Convert a `VarInt` to an `i32`.
 /// Returns `(result, VarInt length)` or `JeValError`.
 /// Peek the stream to get an array, then call this function.
-pub fn var_int_to_int(val: &[u8; 5], read_len: usize) -> Result<(i32, usize), Box<dyn Error>> {
+pub fn var_int_to_int(val: &[u8], read_len: usize) -> Result<(i32, usize), Box<dyn Error>> {
+    if val.is_empty() {
+        return Err("Empty varint array".into());
+    }
     if val[0] == 0 && read_len > 0 {
         Ok((0, 1))
     } else {

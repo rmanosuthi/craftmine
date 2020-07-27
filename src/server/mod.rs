@@ -14,16 +14,20 @@ pub use self::prefix::*;
 pub use self::game::GameServer;
 use config::ConfigFolder;
 use world::WorldFolder;
-use game::AsyncNetInstance;
+use net::AsyncNetInstance;
 pub struct ServerInitializer(pub InitFlags);
 
 pub type Termination = bool;
 pub type InteractionNeeded = bool;
 
 mod net {
+    mod instance;
     mod je;
     mod legacy;
+    mod packets;
+    pub use self::instance::*;
     pub use self::je::*;
+    pub use self::packets::*;
     use self::legacy::*;
 }
 

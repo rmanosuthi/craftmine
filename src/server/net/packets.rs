@@ -19,13 +19,12 @@ macro_rules! declare_packet {
 
         impl JePacket for $name {
             fn try_raw(from: &[JeNetVal]) -> Result<Self, ()> {
+                // TODO verify this isn't a disaster waiting to happen
                 let mut result: $name = unsafe {
                     std::mem::MaybeUninit::zeroed().assume_init()
                 };
                 let mut counter = 0;
                     $(
-                        info!("Iteration {}", counter);
-                        //debug!("target downcast {:?}", std::any::TypeId::of<$field_type>());
                         match from.get(counter).unwrap().to_owned() {
                             JeNetVal::Boolean(b) => {
                                 let b = &b as &dyn Any;

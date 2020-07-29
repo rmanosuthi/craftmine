@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::error::Error;
-use crate::server::config::*;
+use crate::{UserRecord, server::config::*};
 use toml::to_vec;
+use uuid::Uuid;
 
 pub struct ServerPrefix(pub PathBuf);
 
@@ -32,6 +33,9 @@ impl ServerPrefix {
         }).flatten().collect()
     }
     pub fn check_prefix(path: &Path) -> Vec<ServerPrefixError> {
+        unimplemented!()
+    }
+    pub fn read_or_new_user(&self, uuid: &Uuid) -> Result<UserRecord, ServerPrefixError> {
         unimplemented!()
     }
 }

@@ -11,7 +11,8 @@ pub struct ConfigPerf {
     pub chunks_active_max: Option<u64>,
     pub spawn_active_keep: bool,
     pub smp_threads_tick: Option<u64>,
-    pub chunks_pools: ConfigChunkPools
+    pub chunks_pools: ConfigChunkPools,
+    pub target_tick_s_f64: f64
 }
 
 impl Default for ConfigPerf {
@@ -23,7 +24,8 @@ impl Default for ConfigPerf {
             chunks_active_max: Some(32),
             spawn_active_keep: true,
             smp_threads_tick: None,
-            chunks_pools: ConfigChunkPools::default()
+            chunks_pools: ConfigChunkPools::default(),
+            target_tick_s_f64: 0.05f64
         }
     }
 }

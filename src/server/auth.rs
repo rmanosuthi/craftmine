@@ -1,5 +1,6 @@
 use crate::server::net::*;
-use std::error::Error;
+use std::{net::SocketAddr, error::Error};
+use tokio::sync::mpsc::UnboundedSender;
 
 // JE login process
 /**
@@ -60,29 +61,20 @@ pub enum JeLoginError {
     Internal(Box<dyn Error>)
 }
 
-pub struct JeConnectionState {
-    state: u8,
-    enc: Option<JeSessionEncrypt>,
-    status: JeConnectionStatus
+#[derive(Debug, Clone)]
+pub struct JeConnection {
+    pub state: i32,
+    pub enc: Option<JeSessionEncrypt>,
+    pub uuid: uuid::Uuid,
+    pub username: String,
+    pub addr: SocketAddr,
+    pub send: UnboundedSender<(i32, Vec<JeNetVal>)>
 }
 
-impl Default for JeConnectionState {
-    fn default() -> Self {
-        Self {
-            state: 0,
-            enc: None,
-            status: JeConnectionStatus::Unauthenticated
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct JeSessionEncrypt {
+    vtoken: [u8; 4]
 }
-
-pub enum JeConnectionStatus {
-    Unauthenticated,
-    Offline {},
-    Online
-}
-
-pub struct JeSessionEncrypt {}
 
 pub fn jestring_to_string(data: &[u8]) -> String {
     todo!()

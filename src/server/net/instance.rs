@@ -7,11 +7,10 @@ use hashbrown::HashMap;
 use tokio::future::poll_fn;
 use std::sync::Arc;
 use uuid::Uuid;
+use server::game::{NetSendMsg, NetRecvMsg, NetRecvInner};
 
-pub enum NetSendMsg {}
-
-pub enum NetRecvMsg {}
-
+/// Network instance.
+/// TODO make sure clients can't spoof uuid because of the shared uuid socket
 pub struct AsyncNetInstance {
     pub rt_handle: std::thread::JoinHandle<()>,
     pub ani_send: tokio::sync::mpsc::Sender<NetSendMsg>,
@@ -30,43 +29,87 @@ impl AsyncNetInstance {
         let cc = Box::leak(Box::new(cc)) as &'static ConfigCollection;
         let rsa_keypair = Box::leak(Box::new(openssl::rsa::Rsa::generate(1024).unwrap())) as &'static openssl::rsa::Rsa<_>;
         let rt_handle = std::thread::spawn(move || {
-            rt.block_on(async move {
+            rt.block_on(async {
                 let mut async_recv = async_recv;
                 let listen_bind = format!("{}:{}", &vf.bind_addr.0, &vf.je_port.0);
                 let mut listener = tokio::net::TcpListener::bind(&listen_bind).await.unwrap();
+                let (send_new_conn, mut recv_new_conn) = tokio::sync::mpsc::unbounded_channel::<JeConnection>();
+                let mut map_uuid_conn: HashMap<Uuid, JeConnection> = HashMap::new();
+                let mut async_net_active = true;
                 info!("Listening on {}", &listen_bind);
                 //let mut streams = HashMap::new();
-                loop {
+                while async_net_active {
                     tokio::select! {
-                        net_msg = async_recv.recv() => {},
+                        Some(net_msg) = async_recv.recv() => {
+                            match net_msg {
+                                _ => {}
+                            }
+                        },
+                        Some(_) = shutdown.recv() => {
+                            async_net_active = false;
+                        }
+                        Some(new_conn) = recv_new_conn.recv() => {
+                            let (uuid, conn) = (new_conn.uuid.clone(), new_conn);
+                            debug!("Adding session {:?}, {:?}", &uuid, &conn);
+                            info!("{} ({}) has joined the server from {}", &conn.username, &conn.uuid, &conn.addr);
+                            
+                            async_send.send(NetRecvMsg {
+                                uuid: uuid.clone(),
+                                inner: NetRecvInner::NewSession {
+                                    username: conn.username.clone()
+                                }
+                            });
+                            map_uuid_conn.insert(uuid, conn);
+                        },
                         Ok((stream, addr)) = listener.accept() => {
+                            let send_new_conn = send_new_conn.clone();
+                            let async_send = async_send.clone();
                             //streams.insert(addr, stream);
                             tokio::task::spawn(async move {
                                 // TODO timeout
                                 let mut je_client = stream;
-                                let mut state: i32 = 0;
+                                let mut state = 0;
                                 let mut last_seen = tokio::time::Instant::now();
                                 info!("New JE client from {}", &addr);
                                 let mut peek_buf = [0u8; 1];
                                 //tokio::pin!(je_client);
-                                'streamloop: loop {
+                                let (send_to_session, mut recv_send_to_session) = tokio::sync::mpsc::unbounded_channel::<(i32, Vec<JeNetVal>)>();
+                                let mut conn: Option<JeConnection> = None;
+                                let mut run = true;
+                                'streamloop: while run {
+                                    let send_to_session = send_to_session.clone();
+
                                     let poll_try = poll_fn(|mut cx| je_client.poll_peek(&mut cx, &mut peek_buf));
                                     tokio::select! {
+                                        Some(msg_to_session) = recv_send_to_session.recv() => {
+                                            debug!("{} <- new msg", &addr);
+                                            match &conn {
+                                                Some(c) => {
+                                                    match &c.enc {
+                                                        Some(s_enc) => {},
+                                                        None => {
+                                                            write_to_je(&mut je_client, msg_to_session.0, &msg_to_session.1).await;
+                                                        }
+                                                    }
+                                                },
+                                                None => {
+                                                    warn!("{} unexpected outbound packet to incomplete connection", &addr);
+                                                }
+                                            }
+                                        }
                                         poll_result = poll_try => {
                                             match poll_result {
                                                 Ok(0) => {
-                                                    debug!("DE: poll_peek avail 0, assume dc, closing");
-                                                    je_client.shutdown(Shutdown::Both);
-                                                    break 'streamloop;
+                                                    debug!("{} poll_peek len 0, closing", &addr);
+                                                    run = false;
                                                 }
                                                 Ok(bytes_avail) => {
-                                                    debug!("D: @{} AVAIL {}", &addr, bytes_avail);
                                                     match read_from_je(&mut je_client).await {
                                                         Ok((packet_len, packet_id, packet_data)) => {
-                                                            debug!("D: @{} IN P\nlen {} id {} DATA\n\t{:?}\n", &addr, &packet_len, &packet_id, &packet_data);
+                                                            debug!("{} IN P (len {} id {}) DATA\n\t{:?}", &addr, &packet_len, &packet_id, &packet_data);
                                                             match state {
                                                                 0 => {
-                                                                    debug!("state 0, parsing as handshake scanning for next");
+                                                                    debug!("{} state 0, parsing as handshake scanning for next", &addr);
                                                                     let try_handshake_packet = parse_je_data(packet_data.len(), &packet_data, &[
                                                                         JeNetType::VarInt,
                                                                         JeNetType::String,
@@ -80,7 +123,7 @@ impl AsyncNetInstance {
                                                                             debug!("{:?}", &pk_handshake_maybe);
                                                                             if let Ok(pk_handshake) = pk_handshake_maybe {
                                                                                 state = pk_handshake.next_state;
-                                                                                debug!("@{} state -> {}", &addr, state);
+                                                                                debug!("{} state -> {}", &addr, state);
                                                                             } else {
                                                                                 debug!("DE: decode JePacketHandshake failed, skipping");
                                                                             }
@@ -91,17 +134,37 @@ impl AsyncNetInstance {
                                                                     }
                                                                 }
                                                                 1 => {
-                                                                    // reply
-                                                                    debug!("@{} <<< query meta", &addr);
-                                                                    write_to_je(&mut je_client, 0x00, &[JeNetVal::String(server_response_json(
-                                                                        "CM TEST",
-                                                                        578,
-                                                                        20,
-                                                                        0,
-                                                                        &[],
-                                                                        "CraftMine Test Server",
-                                                                        ""
-                                                                    ))]).await;
+                                                                    match packet_id {
+                                                                        0 => {
+                                                                            // reply
+                                                                            debug!("@{} <<< query meta", &addr);
+                                                                            write_to_je(&mut je_client, 0x00, &[JeNetVal::String(server_response_json(
+                                                                                "CM TEST",
+                                                                                578,
+                                                                                20,
+                                                                                0,
+                                                                                &[],
+                                                                                "CraftMine Test Server",
+                                                                                ""
+                                                                            ))]).await;
+                                                                        },
+                                                                        1 => {
+                                                                            // pong
+                                                                            if let Ok(data) = parse_je_data(packet_data.len(), &packet_data, &[
+                                                                                JeNetType::Long
+                                                                            ]) {
+                                                                                if let JeNetVal::Long(ping) = data[0] {
+                                                                                    write_to_je(&mut je_client, 0x1, &[
+                                                                                        JeNetVal::Long(ping)
+                                                                                    ]).await;
+                                                                                    run = false;
+                                                                                }
+                                                                            } else {
+                                                                                debug!("invalid ping packet");
+                                                                            }
+                                                                        },
+                                                                        _ => {}
+                                                                    }
                                                                 }
                                                                 2 => {
                                                                     let try_pk_login = parse_je_data(packet_data.len(), &packet_data, &[
@@ -131,6 +194,15 @@ impl AsyncNetInstance {
                                                                                 JeNetVal::String(pk_login_start.name.clone())
                                                                             ]).await;
                                                                             state = 3;
+                                                                            let new_conn = JeConnection {
+                                                                                state: state,
+                                                                                enc: None,uuid: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+                                                                                addr: addr.clone(),
+                                                                                username: pk_login_start.name.clone(),
+                                                                                send: send_to_session
+                                                                            };
+                                                                            send_new_conn.send(new_conn.clone());
+                                                                            conn = Some(new_conn);
 
                                                                             // join game
                                                                             write_to_je(&mut je_client, 0x26, &[
@@ -201,8 +273,7 @@ impl AsyncNetInstance {
                                                 },
                                                 Err(e) => {
                                                     debug!("DE: poll_peek failed {:?} closing", e);
-                                                    je_client.shutdown(Shutdown::Both);
-                                                    break 'streamloop;
+                                                    run = false;
                                                 }
                                             }
                                         }
@@ -261,18 +332,24 @@ impl AsyncNetInstance {
                                         }*/
                                     };
                                 }
+                                if let Some(c) = conn {
+                                    &async_send.send(NetRecvMsg {
+                                        uuid: c.uuid,
+                                        inner: NetRecvInner::EndSession
+                                    });
+                                }
+                                je_client.shutdown(Shutdown::Both);
+
                             });
-                        },
-                        done = shutdown.recv() => {
-                            unsafe {
-                                drop(Box::from_raw(
-                                    std::mem::transmute::<_, *mut ConfigCollection>(cc)
-                                ));
-                            }
-                            info!("Async network runtime shutting down");
-                            break;
                         }
-                    };
+                    }
+                }
+                info!("Async net thread shutting down");
+                
+                unsafe {
+                    drop(Box::from_raw(
+                        std::mem::transmute::<_, *mut ConfigCollection>(cc)
+                    ));
                 }
             });
         });

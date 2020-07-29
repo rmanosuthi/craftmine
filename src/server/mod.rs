@@ -1,17 +1,19 @@
 use crate::*;
 use crossbeam::{Sender, Receiver};
 use serde::{Serialize, Deserialize};
-use std::{net::TcpListener, error::Error};
+use std::{net::TcpListener, error::Error, time::Duration};
 use hashbrown::HashMap;
 
 mod auth;
 pub mod config;
 mod game;
 mod prefix;
+mod records;
 
 pub use self::auth::*;
 pub use self::prefix::*;
 pub use self::game::GameServer;
+pub use self::records::*;
 use config::ConfigFolder;
 use world::WorldFolder;
 use net::AsyncNetInstance;
@@ -135,6 +137,8 @@ impl ServerInitializer {
                 let sra = SrAllocator::new(&cc);
                 sra.report();
 
+                let (status_to_gs, recv_status_to_gs) = crossbeam::bounded(1);
+                let (status_from_gs, recv_status_from_gs) = crossbeam::bounded(1);
                 let instance = GameServer {
                     prefix: ServerPrefix(validated_flags.prefix.0.clone()),
                     init_flags: validated_flags.clone(),
@@ -142,14 +146,20 @@ impl ServerInitializer {
                     cli_recv: gs_cli_recv,
                     cli_send: gs_cli_send,
                     async_net_instance,
-                    cc
+                    tick: crossbeam::tick(Duration::from_secs_f64(cc.perf.target_tick_s_f64)),
+                    cc,
+                    recv_status: recv_status_to_gs,
+                    send_status: status_from_gs,
+                    users: HashMap::new()
                 };
                 ServerInitResult {
                     instance: if errs.is_empty() {
                         Ok((instance, ServerInitChannels {
                             cli_recv: cli_recv,
                             cli_send: cli_send,
-                            web_ws
+                            web_ws,
+                            send_status: status_to_gs,
+                            recv_status: recv_status_from_gs
                         }))
                     } else {
                         Err(errs)
@@ -184,7 +194,16 @@ pub struct ServerInitResult {
 pub struct ServerInitChannels {
     pub cli_recv: Receiver<CliMessageInbound>,
     pub cli_send: Sender<CliMessageOutbound>,
-    pub web_ws: String
+    pub web_ws: String,
+    pub send_status: Sender<ServerStatus>,
+    pub recv_status: Receiver<ServerStatus>
+}
+
+#[derive(Debug)]
+pub enum ServerStatus {
+    Start,
+    Stop,
+    Pause
 }
 
 #[derive(Debug)]

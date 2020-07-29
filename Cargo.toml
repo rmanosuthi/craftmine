@@ -24,6 +24,7 @@ sysinfo = "0.15"
 num_cpus = "1.13"
 ring = "0.16"
 openssl = "*"
+ctrlc = "*"
 
 [features]
 web = []

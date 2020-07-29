@@ -15,7 +15,7 @@ pub use self::interop::*;
 pub use self::init_flags::*;
 pub use self::server::*;
 use tokio::runtime;
-use std::io::{BufRead, Write};
+use std::{time::Instant, io::{BufRead, Write}};
 use env_logger::fmt::{Color, Style};
 use log::Level;
 use sysinfo::{DiskExt, NetworkExt, NetworksExt, ProcessorExt, SystemExt};
@@ -58,15 +58,15 @@ fn main() {
     debug!("raw opt {:?}", opt);
 
     let init = ServerInitializer(opt);
-    let init_result = init.start();
+    let mut init_result = init.start();
     for info in &init_result.info {
         info!("{}", info);
     }
     for (warn, interaction) in &init_result.warn {
         warn!("{}", warn);
     }
-    match &init_result.instance {
-        Ok((gs, chans)) => {
+    match init_result.instance {
+        Ok((mut gs, mut chans)) => {
             info!("Startup validation passed");
             info!(">>> CraftMine {}-{}", env!("CARGO_PKG_VERSION"), {
                 if cfg!(debug_assertions) {
@@ -77,13 +77,20 @@ fn main() {
             });
             let (stdin_send, stdin_recv) = crossbeam::unbounded();
             let stdin = std::io::stdin();
+            let (ctrl_c_send, ctrl_c_recv) = crossbeam::bounded(1);
+            ctrlc::set_handler(move || {
+                ctrl_c_send.send(Instant::now());
+            });
             std::thread::spawn(move || {
-                
 
                 let mut stdin_lock = stdin.lock();
                 for line in stdin_lock.lines() {
                     stdin_send.send(line.unwrap());
                 }
+            });
+            std::thread::spawn(move || {
+                let mut gs = gs;
+                gs.run();
             });
             
             loop {
@@ -91,8 +98,21 @@ fn main() {
                     recv(stdin_recv) -> in_line => {
                         debug!("stdin {}", in_line.unwrap());
                     },
-                    recv(gs.cli_recv) -> gs_cli_msg => {
+                    recv(&chans.cli_recv) -> gs_cli_msg => {
 
+                    },
+                    recv(ctrl_c_recv) -> _ => {
+                        info!("ctrl-c received, shutting down");
+                        info!("Signalling shutdown...");
+                        chans.send_status.send(ServerStatus::Stop);
+                        let mut wait_game_done = true;
+                        while wait_game_done {
+                            if let Ok(ServerStatus::Stop) = chans.recv_status.recv() {
+                                wait_game_done = false;
+                            }
+                        }
+                        info!("Game server shut down. Terminating.");
+                        std::process::exit(0);
                     }
                 }
             }

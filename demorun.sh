@@ -1,4 +1,4 @@
-cargo run -- \
+cargo +nightly -Z unstable-options run -- \
 	--prefix ~/cmdemo/ \
 	--je-port 25565 \
 	--be-port 9999 \

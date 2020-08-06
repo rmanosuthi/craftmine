@@ -49,7 +49,7 @@ impl GameServer {
                     }
                 }
                 recv(self.tick) -> _ => {
-                    while let Ok(inc_net_packet) = self.async_net_instance.ani_recv.recv() {
+                    while let Ok(inc_net_packet) = self.async_net_instance.ani_recv.try_recv() {
                         debug!("{:?}", inc_net_packet);
                         match inc_net_packet.inner {
                             NetRecvInner::NewSession {username: u} => {

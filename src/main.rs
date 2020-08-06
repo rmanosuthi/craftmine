@@ -84,8 +84,8 @@ fn main() {
                     recv(ctrl_c_recv) -> _ => {
                         info!("ctrl-c received, shutting down");
                         info!("Signalling shutdown...");
-                        std::process::exit(0);
-                        chans.send_status.send(ServerStatus::Stop);
+                        //std::process::exit(0);
+                        chans.send_status.send(ServerStatus::Stop).unwrap();
                         let mut wait_game_done = true;
                         while wait_game_done {
                             if let Ok(ServerStatus::Stop) = chans.recv_status.recv() {

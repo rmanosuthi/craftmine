@@ -94,8 +94,8 @@ impl ServerInitializer {
                 let sra = SrAllocator::new(&cc);
                 sra.report();
 
-                let (status_to_gs, recv_status_to_gs) = crossbeam::bounded(1);
-                let (status_from_gs, recv_status_from_gs) = crossbeam::bounded(1);
+                let (status_to_gs, recv_status_to_gs) = crossbeam::bounded(5);
+                let (status_from_gs, recv_status_from_gs) = crossbeam::bounded(5);
                 let (pfx, pfx_info) = ServerPrefix::load_or_new(&validated_flags.prefix.0);
 
                 for (path, maybe_error) in pfx_info {

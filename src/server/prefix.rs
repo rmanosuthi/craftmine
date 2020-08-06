@@ -1,24 +1,70 @@
-use std::path::{Path, PathBuf};
-use std::error::Error;
-use crate::{UserRecord, server::config::*};
-use toml::to_vec;
-use uuid::Uuid;
+use crate::imports::*;
+use crate::server::symbols::*;
 
-pub struct ServerPrefix(pub PathBuf);
+pub struct ServerPrefix {
+    pub path: PathBuf,
+    pub users: UserPrefix,
+    pub worlds: WorldPrefix
+}
+
+impl UserPrefix {
+    pub fn load_or_new_user(&self, uuid: &Uuid) -> Result<UserRecord, ()> {
+        let mut path = self.0.clone();
+        let mut def = UserRecord::default();
+        def.uuid = uuid.to_owned();
+        path.push(format!(
+            "{}.json",
+            uuid.to_string()
+        ));
+        UserRecord::load_or_new(&path, def)
+    }
+}
+
+pub trait LoadOrNew: serde::ser::Serialize + serde::de::DeserializeOwned {
+    fn load_or_new(path: &Path, default: Self) -> Result<Self, ()> {
+        match std::fs::OpenOptions::new()
+            .write(false)
+            .create(false)
+            .open(&path) {
+            Ok(file) => {
+                // file exists, open ok
+                let reader = std::io::BufReader::new(file);
+                serde_json::from_reader(reader).map_err(|_| ())
+            },
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::NotFound => {
+                    let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .open(&path).map_err(|_| ())?;
+                    let writer = std::io::BufWriter::new(file);
+                    serde_json::to_writer_pretty(writer, &default).map_err(|_| ())?;
+                    Ok(default)
+                },
+                _ => Err(())
+            }
+        }
+    }
+}
+
+pub struct UserPrefix(pub PathBuf);
+
+impl UserPrefix {
+
+}
+
+pub struct WorldPrefix(pub PathBuf);
 
 impl ServerPrefix {
-    /// Create a new prefix.
-    pub fn new_no_override(path: &Path) -> (ServerPrefix, Vec<(PathBuf, Option<ServerPrefixError>)>) {
+    /// Load a prefix or create a new one.
+    pub fn load_or_new(path: &Path) -> (ServerPrefix, Vec<(PathBuf, Option<ServerPrefixError>)>) {
         (
-            ServerPrefix(path.to_owned()),
+            ServerPrefix {
+                path: path.to_owned(),
+                users: UserPrefix(path.to_owned()),
+                worlds: WorldPrefix(path.to_owned())
+            },
             ServerPrefix::init_folders(&path)
-        )
-    }
-    /// Load an already existing prefix.
-    pub fn from(path: &Path) -> (ServerPrefix, Vec<(PathBuf, Option<ServerPrefixError>)>) {
-        (
-            ServerPrefix(path.to_owned()),
-            unimplemented!()
         )
     }
     fn init_folders(path: &Path) -> Vec<(PathBuf, Option<ServerPrefixError>)> {

@@ -1,27 +1,20 @@
-use crate::*;
-use super::ServerPrefix;
-use hashbrown::HashMap;
-use uuid::Uuid;
-use config::ConfigCollection;
-use std::{net::Shutdown, pin::Pin, time::{Duration, Instant}, convert::TryFrom};
-use tokio::prelude::*;
-use server::net::*;
+use crate::imports::*;
+use crate::server::symbols::*;
+use crate::init_flags::*;
 
 pub struct GameServer {
     pub prefix: ServerPrefix,
     pub init_flags: ValidatedInitFlags,
-    pub worlds: HashMap<Uuid, GameWorld>,
-    pub cli_recv: crossbeam::Receiver<CliMessageOutbound>,
-    pub cli_send: crossbeam::Sender<CliMessageInbound>,
-    pub async_net_instance: AsyncNetInstance,
+    pub worlds: HashMap<Uuid, World>,
+    pub cli_recv: crossbeam::Receiver<String>,
+    pub cli_send: crossbeam::Sender<String>,
+    pub async_net_instance: NetServer,
     pub cc: ConfigCollection,
     pub tick: crossbeam::Receiver<Instant>,
     pub recv_status: crossbeam::Receiver<ServerStatus>,
     pub send_status: crossbeam::Sender<ServerStatus>,
     pub users: HashMap<Uuid, UserRecord>
 }
-
-pub struct GameWorld {}
 
 impl GameServer {
     pub fn run(&mut self) {
@@ -30,7 +23,7 @@ impl GameServer {
         while run {
             crossbeam::select! {
                 recv(self.recv_status) -> status => {
-                    debug!("Got status {:?}", status.unwrap());
+                    debug!("Got status {:?}", &status);
                     match status.unwrap() {
                         ServerStatus::Stop => {
                             self.stop();
@@ -61,11 +54,16 @@ impl GameServer {
                         match inc_net_packet.inner {
                             NetRecvInner::NewSession {username: u} => {
                                 info!("{} ({}) has joined the server.", &u, &inc_net_packet.uuid);
-                                if let Ok(user) = self.prefix.users.load_or_new(&inc_net_packet.uuid) {
+                                if let Ok(user) = self.prefix.users.load_or_new_user(
+                                    &inc_net_packet.uuid
+                                ) {
                                     self.users.insert(inc_net_packet.uuid.clone(), user);
                                 } else {
                                     error!("Failed to load or create user record for {}, disconnecting player", &u);
-                                    self.async_net_instance.ani_send();
+                                    self.async_net_instance.disconnect(
+                                        &inc_net_packet.uuid,
+                                        "Failed to access user records"
+                                    );
                                 }
                             },
                             NetRecvInner::EndSession => {
@@ -87,35 +85,5 @@ impl GameServer {
     }
     pub fn stop(&mut self) {
         self.send_status.send(ServerStatus::Stop);
-    }
-}
-
-#[derive(Debug)]
-pub enum NetSendMsg {
-    All(i32, Vec<u8>),
-    Broadcast(Vec<Uuid>, i32, Vec<u8>),
-    Single(Uuid, i32, Vec<u8>),
-    Disconnect(Uuid, String),
-    SetTimeout(Uuid, Instant, Instant, String),
-    UnsetTimeout(Uuid),
-    SetBlock(Uuid, Instant, String),
-    UnsetBlock(Uuid)
-}
-
-#[derive(Debug)]
-pub struct NetRecvMsg {
-    pub uuid: Uuid,
-    pub inner: NetRecvInner
-}
-
-#[derive(Debug)]
-pub enum NetRecvInner {
-    NewSession {
-        username: String
-    },
-    EndSession,
-    Packet {
-        id: i32,
-        data: Vec<u8>
     }
 }

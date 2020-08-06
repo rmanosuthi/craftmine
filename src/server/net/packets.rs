@@ -1,108 +1,64 @@
-use super::JeNetVal;
-use std::any::Any;
-use serde::{Serialize, Deserialize};
+use crate::imports::*;
+use crate::server::symbols::*;
 
 pub trait JePacket: Sized {
-    fn try_raw(from: &[JeNetVal]) -> Result<Self, ()>;
+    fn get_packet_id() -> JeVarInt;
+    fn try_from_raw(be_bytes: &[u8]) -> Result<Self, ()>;
+    fn to_vec_u8(&self) -> Vec<u8>;
 }
 
-/// Declare packet macro.
-/// Extremely inefficient, makes unnecessary copies, but without the copies it doesn't work.
+/// Make a struct a packet.
+/// Field types must implement `JeType` and `Default` and end with a `,` in the declaration.
 macro_rules! declare_packet {
-    (struct $name:ident {
+    ($packet_id:expr, struct $name:ident {
         $($field_name:ident: $field_type:ty,)*
     }) => {
-        #[derive(Serialize, Deserialize, Debug)]
+        #[derive(Default)]
         pub struct $name {
             $(pub $field_name: $field_type,)*
         }
-
         impl JePacket for $name {
-            fn try_raw(from: &[JeNetVal]) -> Result<Self, ()> {
-                // TODO verify this isn't a disaster waiting to happen
-                let mut result: $name = unsafe {
-                    std::mem::MaybeUninit::zeroed().assume_init()
-                };
+            fn get_packet_id() -> JeVarInt {
+                JeVarInt($packet_id)
+            }
+            fn try_from_raw(be_bytes: &[u8]) -> Result<Self, ()> {
+                let mut result = Self::default();
                 let mut counter = 0;
-                    $(
-                        match from.get(counter).unwrap().to_owned() {
-                            JeNetVal::Boolean(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::Byte(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::UByte(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::Short(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::UShort(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::Int(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::Long(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::Float(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::Double(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::String(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::Chat(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::Identifier(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::VarInt(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::VarLong(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            JeNetVal::Array(b) => {
-                                let b = &b as &dyn Any;
-                                result.$field_name = b.downcast_ref::<$field_type>().unwrap().to_owned();
-                            },
-                            _ => unimplemented!()
+                $(
+                    match <$field_type>::try_from_raw(be_bytes.split_at(counter).1) {
+                        Ok((v, bytes_read)) => {
+                            debug!("DECODE {:?} OK", std::any::type_name::<$field_type>());
+                            result.$field_name = v;
+                            counter += bytes_read
+                        },
+                        Err(_) => {
+                            debug!("DECODE {:?} ERR", std::any::type_name::<$field_type>());
+                            return Err(());
                         }
-                        counter += 1;
-                    )*
+                    }
+                )*
                 Ok(result)
+            }
+            fn to_vec_u8(&self) -> Vec<u8> {
+                let mut result = Vec::with_capacity(200);
+                $(
+                    for b in self.$field_name.to_vec_u8() {
+                        result.push(b);
+                    }
+                )*
+                result
             }
         }
     };
 }
 
-declare_packet!(struct JePacketHandshake {
-    protocol_ver: i32,
+declare_packet!(0x00, struct JePacketHandshake {
+    protocol_ver: JeVarInt,
     server_addr: String,
     server_port: u16,
-    next_state: i32,
+    next_state: JeVarInt,
 });
 
-declare_packet!(struct JeLoginStart {
+declare_packet!(0x01, struct JeLoginStart {
     name: String,
 });

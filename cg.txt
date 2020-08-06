@@ -1,0 +1,55 @@
+warn!("Placement of causal blocks will cause a causal group merge scan at end of tick.");
+
+cts block placement
+
+hold block places until receive user migration
+
+then, operate front to back until inv count == 0
+
+cts collision
+
+keep copy of other thread blocks (configurable radius)
+
+a bit of desync ok, not very exploitable
+
+cts redstone
+
+bound whole circuit (or circuits) to cts
+
+debug!("CTS highest priority given to new redstone circuit")
+
+warn("Redstone circuits grow causality groups to ensure correctness, and performance will suffer if they get too big.
+Avoid making circuits spread out, in high-traffic areas, and try to group pistons together.")
+
+cts redstone other
+
+debug!("CTS new redstone object, causality radius 2")
+
+cts piston
+
+debug!("CTS new piston, causality radius 10")
+
+trace for other circuits/pistons within 10 blocks and include in group
+
+cts merge
+
+data CausalGroup = [
+	chunks Vec<Chunk>
+	entities Vec<Entity>
+	oob_hold_for_merge Vec<Entity>
+]
+
+let cg_merge(x, y): (wg, wg) -> wg =
+let cg_move(x, y, c): (cg, cg, chunk) =
+
+
+determine when to merge
+
+everytime causality block created, send to main
+main will merge as necessary
+
+merge on near cg edge
+
+"entity near cg edge" will never happen in this case so don't worry about unknown collision
+
+gobble chunk or merge cgs

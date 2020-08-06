@@ -1,7 +1,5 @@
-use std::path::{Path, PathBuf};
-use std::env::current_dir;
-use structopt::StructOpt;
-use crate::*;
+use crate::imports::*;
+use crate::server::symbols::*;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "craftmine", about = "CraftMine CLI")]
@@ -48,7 +46,7 @@ impl ValidatedInitFlags {
         let prefix = match &init_flags.prefix {
             Some(pfx) => (pfx.clone(), vec![]),
             None => {
-                let current_dir = current_dir().unwrap();
+                let current_dir = std::env::current_dir().unwrap();
                 // use current dir as prefix
                 // add warning
                 (current_dir.clone(), vec![
@@ -87,7 +85,7 @@ impl ValidatedInitFlags {
         })
     }
     pub fn try_create_prefix(&self) -> Vec<String> {
-        ServerPrefix::new_no_override(&self.prefix.0).1.iter().map(|tup| match &tup.1 {
+        ServerPrefix::load_or_new(&self.prefix.0).1.iter().map(|tup| match &tup.1 {
             Some(a) => Some(
                 format!("Prefix error: At {:?}\n\t{}", tup.0, 
                 a.to_string())

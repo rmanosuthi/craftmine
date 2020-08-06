@@ -1,5 +1,5 @@
+use crate::{server::net::legacy, imports::*, server::symbols::*};
 use uuid::Uuid;
-use super::{int_to_var_int, var_int_to_int};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::{error::Error, io::{Read, Write, Cursor, Seek, SeekFrom}, convert::TryFrom};
 use futures::future::poll_fn;
@@ -56,7 +56,7 @@ pub async fn read_from_je(stream: &mut tokio::net::TcpStream) -> Result<(usize, 
     }).await.map_err(|_| ())?;
     let mut len_peek = [0u8; 5];
     let len_peek_read = stream.peek(&mut len_peek).await.map_err(|_| ())?;
-    let (len, len_bytes_read) = match var_int_to_int(&mut len_peek, len_peek_read) {
+    let (len, len_bytes_read) = match legacy::var_int_to_int(&mut len_peek, len_peek_read) {
         Ok(tup) => tup,
         Err(_) => (0, 9999)
     };
@@ -72,7 +72,7 @@ pub async fn read_from_je(stream: &mut tokio::net::TcpStream) -> Result<(usize, 
 
     let mut id_peek = [0u8; 5];
     let id_peek_read = stream.peek(&mut id_peek).await.map_err(|_| ())?;
-    let (id, id_bytes_read) = var_int_to_int(&mut id_peek, id_peek_read).map_err(|_| ())?;
+    let (id, id_bytes_read) = legacy::var_int_to_int(&mut id_peek, id_peek_read).map_err(|_| ())?;
 
     // advance stream by id_bytes_read
     stream.take(id_bytes_read as u64).read(&mut id_peek).await.map_err(|_| ())?;
@@ -83,11 +83,11 @@ pub async fn read_from_je(stream: &mut tokio::net::TcpStream) -> Result<(usize, 
 }
 
 pub async fn write_to_je(stream: &mut tokio::net::TcpStream, packet_id: i32, msgs: &[JeNetVal]) -> Result<usize, Box<dyn Error>> {
-    let packet_id_varint = int_to_var_int(packet_id).unwrap();
+    let packet_id_varint = legacy::int_to_var_int(packet_id);
     let len_msgs: i32 = msgs.iter().map(|e| e.size()).sum();
     let buf: Vec<u8> = [
-        int_to_var_int(len_msgs + packet_id_varint.len() as i32).unwrap(),
-        int_to_var_int(packet_id).unwrap(),
+        legacy::int_to_var_int(len_msgs + packet_id_varint.len() as i32),
+        legacy::int_to_var_int(packet_id),
         msgs.iter().map(|e| e.to_vec_u8()).flatten().collect()
     ].iter().flatten().map(|e| *e).collect();
     stream.write(&buf).await.map_err(|e| e.into())
@@ -127,13 +127,13 @@ impl JeNetVal {
             JeNetVal::Int(_) | JeNetVal::Float(_) => 4,
             JeNetVal::Long(_) | JeNetVal::Double(_) => 8,
             JeNetVal::String(s) | JeNetVal::Chat(s) | JeNetVal::Identifier(s) => {
-                int_to_var_int(s.len() as i32).unwrap().len() as i32 + (s.len() as i32)
+                legacy::int_to_var_int(s.len() as i32).len() as i32 + (s.len() as i32)
             },
-            JeNetVal::VarInt(vi) => int_to_var_int(*vi).unwrap().len() as i32,
+            JeNetVal::VarInt(vi) => legacy::int_to_var_int(*vi).len() as i32,
             JeNetVal::VarLong(vl) => unimplemented!(),
             JeNetVal::Array(vec) => vec.len() as i32,
             JeNetVal::FixedString(s, l) => {
-                int_to_var_int(s.len() as i32).unwrap().len() as i32 + *l as i32
+                legacy::int_to_var_int(s.len() as i32).len() as i32 + *l as i32
             },
             _ => unimplemented!(),
         }
@@ -141,10 +141,10 @@ impl JeNetVal {
     pub fn to_vec_u8(&self) -> Vec<u8> {
         match self {
             JeNetVal::VarInt(vi) => {
-                int_to_var_int(*vi).unwrap()
+                legacy::int_to_var_int(*vi)
             },
             JeNetVal::String(s) => {
-                [int_to_var_int(s.len() as i32).unwrap(),
+                [legacy::int_to_var_int(s.len() as i32),
                 s.as_bytes().to_owned()].iter().flatten().map(|e| *e).collect()
             },
             JeNetVal::Array(vec) => vec.clone(),
@@ -164,7 +164,7 @@ impl JeNetVal {
                 info!("padding target {}", pad_target);
                 s_w.truncate(*l);
                 [
-                    int_to_var_int(*l as i32).unwrap(),
+                    legacy::int_to_var_int(*l as i32),
                     if pad_target != 0 {
                         vec![0u8; pad_target]
                     } else {vec![]},
@@ -236,8 +236,8 @@ impl JeNetVal {
             JeNetType::String => {
                 // scan varint
                 let (fp, sp) = data.split_at(at);
-                let (str_len, varint_len) = var_int_to_int(sp, sp.len()).map_err(|_| ())?;
-                cursor.seek(SeekFrom::Current(varint_len as i64)).map_err(|_| ())?;
+                let (str_len, varint_len) = legacy::var_int_to_int(sp, sp.len()).map_err(|_| ())?;
+                std::io::Seek::seek(&mut cursor, SeekFrom::Current(varint_len as i64)).map_err(|_| ())?;
                 let mut try_string = Vec::new();
                 let str_read = std::io::Read::take(cursor, str_len as u64).read_to_end(&mut try_string).map_err(|_| ())?;
                 if str_read != str_len as usize {
@@ -251,7 +251,7 @@ impl JeNetVal {
             },
             JeNetType::VarInt => {
                 let (_, sp) = data.split_at(at);
-                match var_int_to_int(sp, sp.len()) {
+                match legacy::var_int_to_int(sp, sp.len()) {
                     Ok((varint, read_len)) => {
                         Ok((JeNetVal::VarInt(varint), read_len))
                     },

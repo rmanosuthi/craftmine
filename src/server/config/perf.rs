@@ -1,5 +1,5 @@
-use super::*;
-use std::time::Duration;
+use crate::imports::*;
+use crate::server::symbols::*;
 
 use serde::{Serialize, Deserialize};
 
@@ -12,7 +12,8 @@ pub struct ConfigPerf {
     pub spawn_active_keep: bool,
     pub smp_threads_tick: Option<u64>,
     pub chunks_pools: ConfigChunkPools,
-    pub target_tick_s_f64: f64
+    pub target_tick_s_f64: f64,
+    pub cg_causality_map: HashMap<BlockId, u64>
 }
 
 impl Default for ConfigPerf {
@@ -25,7 +26,10 @@ impl Default for ConfigPerf {
             spawn_active_keep: true,
             smp_threads_tick: None,
             chunks_pools: ConfigChunkPools::default(),
-            target_tick_s_f64: 0.05f64
+            target_tick_s_f64: 0.05f64,
+            cg_causality_map: [
+                (BlockId(0, 0), 0)
+            ].iter().map(|e| *e).collect()
         }
     }
 }

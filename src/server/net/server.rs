@@ -1,17 +1,12 @@
-use crate::*;
-use tokio::io::{AsyncReadExt, AsyncBufRead, AsyncBufReadExt, BufStream};
-use tokio::stream::{StreamExt, StreamMap};
-use super::*;
-use std::net::Shutdown;
-use hashbrown::HashMap;
+use crate::imports::*;
+use crate::server::symbols::*;
+use crate::init_flags::*;
 use tokio::future::poll_fn;
-use std::sync::Arc;
-use uuid::Uuid;
-use server::game::{NetSendMsg, NetRecvMsg, NetRecvInner};
+use std::net::Shutdown;
 
 /// Network instance.
 /// TODO make sure clients can't spoof uuid because of the shared uuid socket
-pub struct AsyncNetInstance {
+pub struct NetServer {
     pub rt_handle: std::thread::JoinHandle<()>,
     pub ani_send: tokio::sync::mpsc::Sender<NetSendMsg>,
     pub ani_recv: crossbeam::Receiver<NetRecvMsg>,
@@ -19,8 +14,8 @@ pub struct AsyncNetInstance {
     cc_ptr: &'static ConfigCollection
 }
 
-impl AsyncNetInstance {
-    pub fn new(vf: ValidatedInitFlags, cc: ConfigCollection) -> AsyncNetInstance {
+impl NetServer {
+    pub fn new(vf: ValidatedInitFlags, cc: ConfigCollection) -> NetServer {
         let mut rt = tokio::runtime::Builder::new().basic_scheduler().enable_all().build().unwrap();
         let (ani_send, mut async_recv) = tokio::sync::mpsc::channel(cc.net.sync_async_channel_len);
         let (shutdown_send, mut shutdown) = tokio::sync::mpsc::unbounded_channel::<u64>();
@@ -110,27 +105,11 @@ impl AsyncNetInstance {
                                                             match state {
                                                                 0 => {
                                                                     debug!("{} state 0, parsing as handshake scanning for next", &addr);
-                                                                    let try_handshake_packet = parse_je_data(packet_data.len(), &packet_data, &[
-                                                                        JeNetType::VarInt,
-                                                                        JeNetType::String,
-                                                                        JeNetType::UShort,
-                                                                        JeNetType::VarInt
-                                                                    ]);
-                                                                    debug!("{:?}", try_handshake_packet);
-                                                                    match try_handshake_packet {
-                                                                        Ok(mut packet) => {
-                                                                            let pk_handshake_maybe = JePacketHandshake::try_raw(&packet);
-                                                                            debug!("{:?}", &pk_handshake_maybe);
-                                                                            if let Ok(pk_handshake) = pk_handshake_maybe {
-                                                                                state = pk_handshake.next_state;
-                                                                                debug!("{} state -> {}", &addr, state);
-                                                                            } else {
-                                                                                debug!("DE: decode JePacketHandshake failed, skipping");
-                                                                            }
-                                                                        },
-                                                                        Err(_) => {
-                                                                            debug!("DE: @{} malformed data, skipping", &addr); 
-                                                                        }
+                                                                    if let Ok(pk_handshake) = JePacketHandshake::try_from_raw(&packet_data) {
+                                                                        state = pk_handshake.next_state.0;
+                                                                        debug!("{} state -> {}", &addr, state);
+                                                                    } else {
+                                                                        debug!("DE: decode JePacketHandshake failed, skipping");
                                                                     }
                                                                 }
                                                                 1 => {
@@ -167,11 +146,7 @@ impl AsyncNetInstance {
                                                                     }
                                                                 }
                                                                 2 => {
-                                                                    let try_pk_login = parse_je_data(packet_data.len(), &packet_data, &[
-                                                                        JeNetType::String
-                                                                    ]).unwrap();
-                                                                    debug!("{:?}", try_pk_login);
-                                                                    if let Ok(pk_login_start) = JeLoginStart::try_raw(&try_pk_login) {
+                                                                    if let Ok(pk_login_start) = JeLoginStart::try_from_raw(&packet_data) {
                                                                         debug!("try_pk_login_raw ok");
                                                                         if cc.auth.online_mode {
                                                                             let pubkey = rsa_keypair.public_key_to_der().unwrap();
@@ -196,7 +171,8 @@ impl AsyncNetInstance {
                                                                             state = 3;
                                                                             let new_conn = JeConnection {
                                                                                 state: state,
-                                                                                enc: None,uuid: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+                                                                                enc: None,
+                                                                                uuid: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
                                                                                 addr: addr.clone(),
                                                                                 username: pk_login_start.name.clone(),
                                                                                 send: send_to_session
@@ -277,59 +253,6 @@ impl AsyncNetInstance {
                                                 }
                                             }
                                         }
-                                        /*je_res = read_from_je(&mut je_client) => {
-                                            match je_res {
-                                                Ok((packet_len, packet_id, packet_data)) => {
-                                                    debug!("D: @{} IN P\nlen {} id {} DATA\n\t{:?}\n", &addr, &packet_len, &packet_id, &packet_data);
-                                                    match (state, packet_id) {
-                                                        (0, 0) => {
-                                                            /*match JePacketHandshake::try_from(packet_data.as_slice()) {
-                                                                Ok(p) => {},
-                                                                Err(e) => {
-                                                                    // TODO skip whole packet len bytes
-                                                                    warn!("Invalid handshake packet with state 0");
-                                                                    if (&cc).net.kick_invalid_packet {
-                                                                        je_kick(&mut je_client, e);
-                                                                        break 'streamloop;
-                                                                    }
-                                                                }
-                                                            }*/
-                                                        },
-                                                        (1, 0) => {
-                                                            if packet_len == 1 {
-                                                                // query status
-                                                            }
-                                                        },
-                                                        (ivs, ivpid) => {
-                                                            warn!("Invalid state {} and packet id {}", ivs, ivpid);
-                                                            if (&cc).net.kick_invalid_packet {
-                                                                je_kick(&mut je_client, format!("Invalid state {} and packet id {}", ivs, ivpid).into());
-                                                                break 'streamloop;
-                                                            }
-                                                        }
-                                                    }
-                                                },
-                                                Err(e) => {
-                                                    if e.is::<std::io::Error>() {
-                                                        debug!("D: @{} SHUTDOWN", &addr);
-                                                        debug!("==========");
-                                                        je_client.shutdown(Shutdown::Both);
-                                                    } else {
-                                                        match e.description() {
-                                                            "VARINTERR" => {
-                                                                debug!("DE: @{} VARINTERR", &addr);
-                                                            },
-                                                            "empty" => {
-                                                                debug!("D: @{} EMPTY", &addr);
-                                                            },
-                                                            o => {
-                                                                debug!("DE: other error {}", o);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }*/
                                     };
                                 }
                                 if let Some(c) = conn {
@@ -353,7 +276,7 @@ impl AsyncNetInstance {
                 }
             });
         });
-        AsyncNetInstance {
+        Self {
             rt_handle,
             ani_send,
             ani_recv,
@@ -361,12 +284,34 @@ impl AsyncNetInstance {
             signal_shutdown: shutdown_send
         }
     }
-}
 
-// TODO make sure async runtime's done before freeing cc
-impl Drop for AsyncNetInstance {
-    fn drop(&mut self) {
-        std::thread::sleep_ms(1000);
-        self.signal_shutdown.send(0);
+    pub fn all(&mut self, packet_id: i32, data: &[u8]) {
+        self.ani_send.send(NetSendMsg::All(
+            packet_id, data.to_owned()
+        ));
+    }
+    pub fn broadcast(&mut self, packet_id: i32, to: &[Uuid], data: &[u8]) {
+        self.ani_send.send(NetSendMsg::Broadcast(
+            to.to_owned(), packet_id, data.to_owned()
+        ));
+    }
+    pub fn single(&mut self, packet_id: i32, to: &Uuid, data: &[u8]) {
+        self.ani_send.send(NetSendMsg::Single(
+            to.to_owned(), packet_id, data.to_owned()
+        ));
+    }
+    pub fn disconnect(&mut self, to: &Uuid, msg: &str) {
+        self.ani_send.send(NetSendMsg::Disconnect(
+            to.to_owned(), msg.to_owned()
+        ));
+    }
+    pub fn timeout(&mut self, player: &Uuid, duration: Option<Duration>, msg: &str) {
+        self.ani_send.send(
+            if let Some(dur) = duration {
+                NetSendMsg::DefiniteTimeout(player.to_owned(), dur, msg.to_owned())
+            } else {
+                NetSendMsg::IndefiniteTimeout(player.to_owned(), msg.to_owned())
+            }
+        );
     }
 }

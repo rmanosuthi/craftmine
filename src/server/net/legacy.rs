@@ -1,4 +1,5 @@
-use crate::*;
+use crate::imports::*;
+use crate::server::symbols::*;
 use super::JeValError;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::error::Error;
@@ -32,7 +33,7 @@ pub fn var_int_to_int(val: &[u8], read_len: usize) -> Result<(i32, usize), Box<d
     }
 }
 
-pub fn int_to_var_int(val: i32) -> Result<Vec<u8>, JeValError> {
+pub fn int_to_var_int(val: i32) -> Vec<u8> {
     let mut val = val;
     let mut buf = Vec::new();
     if val == 0 {
@@ -47,5 +48,5 @@ pub fn int_to_var_int(val: i32) -> Result<Vec<u8>, JeValError> {
             buf.push(temp);
         }
     }
-    Ok(buf)
+    buf
 }

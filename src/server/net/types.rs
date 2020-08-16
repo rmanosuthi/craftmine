@@ -1,5 +1,6 @@
 use crate::imports::*;
 use crate::server::symbols::*;
+
 pub trait JeType: Sized {
     fn to_vec_u8(&self) -> Vec<u8>;
     fn try_from_raw(be_bytes: &[u8]) -> Result<(Self, usize), ()>;
@@ -178,8 +179,79 @@ impl JeType for JeVarLong {
     }
 }
 
+// Array
+impl JeType for Vec<u8> {
+    fn to_vec_u8(&self) -> Vec<u8> {
+        self.to_owned()
+    }
+    fn try_from_raw(be_bytes: &[u8]) -> Result<(Self, usize), ()> {
+        Ok((be_bytes.to_vec(), be_bytes.len()))
+    }
+}
+
 pub enum JeTypeError {}
 
 #[derive(Debug, Default)]
 pub struct JeVarInt(pub i32);
+
+#[derive(Debug, Default)]
 pub struct JeVarLong(pub i64);
+
+#[derive(Debug, Default)]
+pub struct JeChat(pub String);
+
+impl JeType for JeChat {
+    fn to_vec_u8(&self) -> Vec<u8> {
+        serde_json::to_string(
+            &serde_json::json!({"text": &self.0})
+        ).unwrap().to_vec_u8()
+    }
+    fn try_from_raw(be_bytes: &[u8]) -> Result<(Self, usize), ()> {
+        match String::try_from_raw(be_bytes) {
+            Ok((s, l)) => {
+                if let Ok(chat) = serde_json::from_str::<serde_json::Value>(&s) {
+                    if let Some(content) = chat.get("text") {
+                        if let Some(actual_content) = content.as_str() {
+                            return Ok((JeChat(actual_content.to_owned()), l));
+                        }
+                    }
+                }
+                Err(())
+            },
+            Err(_) => Err(())
+        }
+    }
+}
+
+pub enum JeLevelType {
+    Default,
+    Flat,
+    LargeBiomes,
+    Amplified,
+    Customized,
+    Buffet,
+    Default_1_1
+}
+
+impl Default for JeLevelType {
+    fn default() -> Self {
+        JeLevelType::Default
+    }
+}
+
+impl JeType for JeLevelType {
+    fn to_vec_u8(&self) -> Vec<u8> {
+        format!("{}", match &self {
+            JeLevelType::Default => "default",
+            JeLevelType::Flat => "flat",
+            JeLevelType::LargeBiomes => "largeBiomes",
+            JeLevelType::Amplified => "amplified",
+            JeLevelType::Customized => "customized",
+            JeLevelType::Buffet => "buffet",
+            JeLevelType::Default_1_1 => "default_1_1"
+        }).to_vec_u8()
+    }
+    fn try_from_raw(be_bytes: &[u8]) -> Result<(Self, usize), ()> {
+        Err(())
+    }
+}

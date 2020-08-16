@@ -23,7 +23,8 @@ pub struct NetRecvMsg {
 #[derive(Debug)]
 pub enum NetRecvInner {
     NewSession {
-        username: String
+        username: String,
+        online: bool
     },
     EndSession,
     Packet {

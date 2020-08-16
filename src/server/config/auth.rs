@@ -3,13 +3,15 @@ use super::ConfigFile;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ConfigAuth {
-    pub online_mode: bool
+    pub online_mode: bool,
+    pub max_players: u64
 }
 
 impl Default for ConfigAuth {
     fn default() -> Self {
         Self {
-            online_mode: true
+            online_mode: true,
+            max_players: 20
         }
     }
 }

@@ -13,7 +13,8 @@ pub struct GameServer {
     pub tick: crossbeam::Receiver<Instant>,
     pub recv_status: crossbeam::Receiver<ServerStatus>,
     pub send_status: crossbeam::Sender<ServerStatus>,
-    pub users: HashMap<Uuid, UserRecord>
+    pub users: HashMap<Uuid, UserRecord>,
+    pub last_tick: Instant
 }
 
 impl GameServer {
@@ -52,12 +53,25 @@ impl GameServer {
                     while let Ok(inc_net_packet) = self.async_net_instance.ani_recv.try_recv() {
                         debug!("{:?}", inc_net_packet);
                         match inc_net_packet.inner {
-                            NetRecvInner::NewSession {username: u} => {
-                                info!("{} ({}) has joined the server.", &u, &inc_net_packet.uuid);
-                                if let Ok(user) = self.prefix.users.load_or_new_user(
-                                    &inc_net_packet.uuid
-                                ) {
+                            NetRecvInner::NewSession {
+                                username: u,
+                                online: online
+                            } => {
+                                if let Ok(user) = match online {
+                                    true => {
+                                        info!("{} ({}) has joined the server.", &u, &inc_net_packet.uuid);
+                                        self.prefix.users.load_or_new_online(
+                                            &inc_net_packet.uuid,
+                                            &u
+                                        )
+                                    },
+                                    false => {
+                                        warn!("OFFLINE {} ({}) has joined the server.", &u, &inc_net_packet.uuid);
+                                        self.prefix.users.load_or_new_offline(&u)
+                                    }
+                                } {
                                     self.users.insert(inc_net_packet.uuid.clone(), user);
+                                    self.accept_user(&user);
                                 } else {
                                     error!("Failed to load or create user record for {}, disconnecting player", &u);
                                     self.async_net_instance.disconnect(
@@ -85,5 +99,10 @@ impl GameServer {
     }
     pub fn stop(&mut self) {
         self.send_status.send(ServerStatus::Stop);
+    }
+    pub fn accept_user(&mut self, u: &UserRecord) {
+        self.async_net_instance.single(&u.uuid, JeJoinGame {
+
+        });
     }
 }

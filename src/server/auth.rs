@@ -68,7 +68,31 @@ pub struct JeConnection {
     pub uuid: uuid::Uuid,
     pub username: String,
     pub addr: SocketAddr,
-    pub send: UnboundedSender<(i32, Vec<JeNetVal>)>
+    pub send: UnboundedSender<(i32, Vec<u8>)>,
+    pub online: bool
+}
+
+impl JeConnection {
+    pub fn send<T: JePacket>(&self, packet: T) {
+        if let Some(e) = &self.enc {
+            unimplemented!()
+        } else {
+            self.send.send((
+                packet.get_packet_id().0,
+                packet.to_vec_u8()
+            ));
+        }
+    }
+    pub fn send_raw(&self, packet_id: i32, data: &[u8]) {
+        if let Some(e) = &self.enc {
+            unimplemented!()
+        } else {
+            self.send.send((
+                packet_id,
+                data.to_owned()
+            ));
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

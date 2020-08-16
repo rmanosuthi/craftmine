@@ -1,6 +1,7 @@
 use crate::imports::*;
 use crate::server::symbols::*;
 
+#[derive(Debug, Clone)]
 pub struct ServerPrefix {
     pub path: PathBuf,
     pub users: UserPrefix,
@@ -8,13 +9,28 @@ pub struct ServerPrefix {
 }
 
 impl UserPrefix {
-    pub fn load_or_new_user(&self, uuid: &Uuid) -> Result<UserRecord, ()> {
+    pub fn load_or_new_online(&self, uuid: &Uuid, username: &str) -> Result<UserRecord, ()> {
         let mut path = self.0.clone();
         let mut def = UserRecord::default();
         def.uuid = uuid.to_owned();
+        def.username = username.to_owned();
+        def.online = true;
         path.push(format!(
             "{}.json",
             uuid.to_string()
+        ));
+        UserRecord::load_or_new(&path, def)
+    }
+    pub fn load_or_new_offline(&self, username: &str) -> Result<UserRecord, ()> {
+        let mut path = self.0.clone();
+        let mut def = UserRecord::default();
+        def.uuid = Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, username.as_bytes());
+        def.username = username.to_owned();
+        def.online = false;
+        warn!("Offline user {} has a UUID (v5, namespace OID, SHA-1 of username) of {}", username, &def.uuid);
+        path.push(format!(
+            "{}.json",
+            def.uuid.to_string()
         ));
         UserRecord::load_or_new(&path, def)
     }
@@ -22,7 +38,9 @@ impl UserPrefix {
 
 pub trait LoadOrNew: serde::ser::Serialize + serde::de::DeserializeOwned {
     fn load_or_new(path: &Path, default: Self) -> Result<Self, ()> {
+        debug!("LOAD_OR_NEW {:?}", &path);
         match std::fs::OpenOptions::new()
+            .read(true)
             .write(false)
             .create(false)
             .open(&path) {
@@ -31,29 +49,46 @@ pub trait LoadOrNew: serde::ser::Serialize + serde::de::DeserializeOwned {
                 let reader = std::io::BufReader::new(file);
                 serde_json::from_reader(reader).map_err(|_| ())
             },
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::NotFound => {
-                    let file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .open(&path).map_err(|_| ())?;
-                    let writer = std::io::BufWriter::new(file);
-                    serde_json::to_writer_pretty(writer, &default).map_err(|_| ())?;
-                    Ok(default)
-                },
-                _ => Err(())
+            Err(e) => {
+                debug!("USER_ACCESS ERROR {:?}", e.kind());
+                match e.kind() {
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidInput => {
+                        let file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .open(&path).map_err(|_| ())?;
+                        let writer = std::io::BufWriter::new(file);
+                        serde_json::to_writer_pretty(writer, &default).map_err(|_| ())?;
+                        Ok(default)
+                    },
+                    _ => Err(())
+                }
             }
         }
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct UserPrefix(pub PathBuf);
 
 impl UserPrefix {
-
+    pub fn from(p: &Path) -> Self {
+        let mut path = p.to_owned();
+        path.push("users");
+        Self(path)
+    }
 }
 
+#[derive(Debug, Clone)]
 pub struct WorldPrefix(pub PathBuf);
+
+impl WorldPrefix {
+    pub fn from(p: &Path) -> Self {
+        let mut path = p.to_owned();
+        path.push("worlds");
+        Self(path)
+    }
+}
 
 impl ServerPrefix {
     /// Load a prefix or create a new one.
@@ -61,8 +96,8 @@ impl ServerPrefix {
         (
             ServerPrefix {
                 path: path.to_owned(),
-                users: UserPrefix(path.to_owned()),
-                worlds: WorldPrefix(path.to_owned())
+                users: UserPrefix::from(path),
+                worlds: WorldPrefix::from(path)
             },
             ServerPrefix::init_folders(&path)
         )

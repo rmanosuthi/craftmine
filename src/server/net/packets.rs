@@ -1,10 +1,17 @@
 use crate::imports::*;
 use crate::server::symbols::*;
+use async_trait::async_trait;
+use futures::TryFutureExt;
 
+#[async_trait]
 pub trait JePacket: Sized {
-    fn get_packet_id() -> JeVarInt;
+    fn get_packet_id(&self) -> JeVarInt;
     fn try_from_raw(be_bytes: &[u8]) -> Result<Self, ()>;
     fn to_vec_u8(&self) -> Vec<u8>;
+    async fn write_to_stream(&self, stream: &mut tokio::net::TcpStream) -> Result<usize, ()> {
+        write_to_je_raw(stream, self.get_packet_id().0, &self.to_vec_u8())
+            .map_err(|_| ()).await
+    }
 }
 
 /// Make a struct a packet.
@@ -18,7 +25,7 @@ macro_rules! declare_packet {
             $(pub $field_name: $field_type,)*
         }
         impl JePacket for $name {
-            fn get_packet_id() -> JeVarInt {
+            fn get_packet_id(&self) -> JeVarInt {
                 JeVarInt($packet_id)
             }
             fn try_from_raw(be_bytes: &[u8]) -> Result<Self, ()> {
@@ -29,7 +36,7 @@ macro_rules! declare_packet {
                         Ok((v, bytes_read)) => {
                             debug!("DECODE {:?} OK", std::any::type_name::<$field_type>());
                             result.$field_name = v;
-                            counter += bytes_read
+                            counter += bytes_read;
                         },
                         Err(_) => {
                             debug!("DECODE {:?} ERR", std::any::type_name::<$field_type>());
@@ -62,3 +69,51 @@ declare_packet!(0x00, struct JePacketHandshake {
 declare_packet!(0x01, struct JeLoginStart {
     name: String,
 });
+
+declare_packet!(0x00, struct JeHandshakeResponse {
+    json: String,
+});
+
+declare_packet!(0x00, struct JeLoginDisconnect {
+    reason: JeChat,
+});
+
+declare_packet!(0x1b, struct JePlayDisconnect {
+    reason: JeChat,
+});
+
+declare_packet!(0x01, struct JePacketPing {
+    val: i64,
+});
+
+declare_packet!(0x01, struct JePacketPong {
+    val: i64,
+});
+
+declare_packet!(0x01, struct JeEncRequest {
+    server_id: String,
+    pubkey_len: JeVarInt,
+    pubkey: Vec<u8>,
+    vtoken_len: JeVarInt,
+    vtoken: Vec<u8>,
+});
+
+declare_packet!(0x02, struct JeLoginSuccess {
+    uuid: String,
+    username: String,
+});
+
+declare_packet!(0x26, struct JeJoinGame {
+    entity_id: i32,
+    gamemode: u8,
+    dimension: i32,
+    hashed_seed: i64,
+    max_players: u8,
+    level_type: JeLevelType,
+    view_distance: JeVarInt,
+    reduced_debug_info: bool,
+    enable_respawn_screen: bool,
+});
+
+// TODO
+declare_packet!(0x22, struct JeChunk {});

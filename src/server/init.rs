@@ -84,7 +84,9 @@ impl ServerInitializer {
 
             if errs.is_empty() {
                 let cc = cc_maybe.unwrap();
-                let async_net_instance = NetServer::new(validated_flags.clone(), cc.clone());
+                let (pfx, pfx_info) = ServerPrefix::load_or_new(&validated_flags.prefix.0);
+
+                let async_net_instance = NetServer::new(validated_flags.clone(), cc.clone(), pfx.clone());
 
                 let (cli_send, gs_cli_recv) = crossbeam::unbounded();
                 let (gs_cli_send, cli_recv) = crossbeam::unbounded();
@@ -94,9 +96,12 @@ impl ServerInitializer {
                 let sra = SrAllocator::new(&cc);
                 sra.report();
 
+                if cc.auth.online_mode == false {
+                    warn!("Starting server in offline mode. Cannot verify users.");
+                }
+
                 let (status_to_gs, recv_status_to_gs) = crossbeam::bounded(5);
                 let (status_from_gs, recv_status_from_gs) = crossbeam::bounded(5);
-                let (pfx, pfx_info) = ServerPrefix::load_or_new(&validated_flags.prefix.0);
 
                 for (path, maybe_error) in pfx_info {
                     debug!("prefix into {:?} {:?}", path, maybe_error);

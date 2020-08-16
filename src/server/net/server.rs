@@ -2,7 +2,8 @@ use crate::imports::*;
 use crate::server::symbols::*;
 use crate::init_flags::*;
 use tokio::future::poll_fn;
-use std::net::Shutdown;
+use std::{sync::Arc, net::Shutdown};
+use crossbeam::sync::ShardedLock;
 
 /// Network instance.
 /// TODO make sure clients can't spoof uuid because of the shared uuid socket
@@ -14,15 +15,65 @@ pub struct NetServer {
     cc_ptr: &'static ConfigCollection
 }
 
+pub struct ServerJsonStatus {
+    pub server_name: String,
+    pub server_protocol: u16,
+    pub online_players: u64,
+    pub max_players: u64,
+    pub desc: String,
+    pub favicon: String
+}
+
+impl ServerJsonStatus {
+    pub fn from(cc: &ConfigCollection) -> ServerJsonStatus {
+        Self {
+            server_name: cc.net.server_name.to_owned(),
+            server_protocol: 578,
+            online_players: 0,
+            max_players: cc.auth.max_players,
+            desc: cc.net.server_description.to_owned(),
+            favicon: "".to_owned()
+        }
+    }
+    pub fn to_json(&self) -> String {
+        let mut result = serde_json::to_string(&serde_json::json!({
+            "version": {
+                "name": self.server_name,
+                "protocol": self.server_protocol
+            },
+            "players": {
+                "max": self.max_players,
+                "online": self.online_players,
+                "sample": []
+            },
+            "description": {
+                "extra": [
+                    {
+                        "text": self.desc
+                    }
+                ],
+                "text": ""
+            },
+            //"favicon": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        }))
+        .unwrap();
+        result
+    }
+}
+
 impl NetServer {
-    pub fn new(vf: ValidatedInitFlags, cc: ConfigCollection) -> NetServer {
+    pub fn new(vf: ValidatedInitFlags, cc: ConfigCollection, sp: ServerPrefix) -> NetServer {
         let mut rt = tokio::runtime::Builder::new().basic_scheduler().enable_all().build().unwrap();
         let (ani_send, mut async_recv) = tokio::sync::mpsc::channel(cc.net.sync_async_channel_len);
         let (shutdown_send, mut shutdown) = tokio::sync::mpsc::unbounded_channel::<u64>();
         let (async_send, ani_recv) = crossbeam::unbounded();
         let vf = vf.clone();
         let cc = Box::leak(Box::new(cc)) as &'static ConfigCollection;
+        let sp = Box::leak(Box::new(sp)) as &'static ServerPrefix;
         let rsa_keypair = Box::leak(Box::new(openssl::rsa::Rsa::generate(1024).unwrap())) as &'static openssl::rsa::Rsa<_>;
+        let server_json_status = Arc::new(ShardedLock::new(
+            ServerJsonStatus::from(&cc)
+        ));
         let rt_handle = std::thread::spawn(move || {
             rt.block_on(async {
                 let mut async_recv = async_recv;
@@ -36,7 +87,25 @@ impl NetServer {
                 while async_net_active {
                     tokio::select! {
                         Some(net_msg) = async_recv.recv() => {
+                            debug!("SENDOUT {:?}", &net_msg);
                             match net_msg {
+                                NetSendMsg::Disconnect(uuid, reason) => {
+                                    if let Some(conn) = map_uuid_conn.get(&uuid) {
+                                        conn.send(JePlayDisconnect {
+                                            reason: JeChat(reason)
+                                        });
+                                        map_uuid_conn.remove(&uuid);
+                                    } else {
+                                        error!("Trying to disconnect nonexistent uuid");
+                                    }
+                                },
+                                NetSendMsg::Single(uuid, packet_id, data) => {
+                                    if let Some(conn) = map_uuid_conn.get(&uuid) {
+                                        conn.send_raw(packet_id, &data);
+                                    } else {
+                                        error!("Trying to send single to nonexistent uuid");
+                                    }
+                                }
                                 _ => {}
                             }
                         },
@@ -51,7 +120,8 @@ impl NetServer {
                             async_send.send(NetRecvMsg {
                                 uuid: uuid.clone(),
                                 inner: NetRecvInner::NewSession {
-                                    username: conn.username.clone()
+                                    username: conn.username.clone(),
+                                    online: conn.online
                                 }
                             });
                             map_uuid_conn.insert(uuid, conn);
@@ -60,6 +130,7 @@ impl NetServer {
                             let send_new_conn = send_new_conn.clone();
                             let async_send = async_send.clone();
                             //streams.insert(addr, stream);
+                            let server_json_status = Arc::clone(&server_json_status);
                             tokio::task::spawn(async move {
                                 // TODO timeout
                                 let mut je_client = stream;
@@ -68,7 +139,7 @@ impl NetServer {
                                 info!("New JE client from {}", &addr);
                                 let mut peek_buf = [0u8; 1];
                                 //tokio::pin!(je_client);
-                                let (send_to_session, mut recv_send_to_session) = tokio::sync::mpsc::unbounded_channel::<(i32, Vec<JeNetVal>)>();
+                                let (send_to_session, mut recv_send_to_session) = tokio::sync::mpsc::unbounded_channel::<(i32, Vec<u8>)>();
                                 let mut conn: Option<JeConnection> = None;
                                 let mut run = true;
                                 'streamloop: while run {
@@ -81,9 +152,11 @@ impl NetServer {
                                             match &conn {
                                                 Some(c) => {
                                                     match &c.enc {
-                                                        Some(s_enc) => {},
+                                                        Some(s_enc) => {
+                                                            unimplemented!()
+                                                        },
                                                         None => {
-                                                            write_to_je(&mut je_client, msg_to_session.0, &msg_to_session.1).await;
+                                                            write_to_je_raw(&mut je_client, msg_to_session.0, &msg_to_session.1).await;
                                                         }
                                                     }
                                                 },
@@ -117,27 +190,21 @@ impl NetServer {
                                                                         0 => {
                                                                             // reply
                                                                             debug!("@{} <<< query meta", &addr);
-                                                                            write_to_je(&mut je_client, 0x00, &[JeNetVal::String(server_response_json(
-                                                                                "CM TEST",
-                                                                                578,
-                                                                                20,
-                                                                                0,
-                                                                                &[],
-                                                                                "CraftMine Test Server",
-                                                                                ""
-                                                                            ))]).await;
+                                                                            // lock status
+                                                                            let json = {
+                                                                                let status_lock = server_json_status.read().unwrap();
+                                                                                status_lock.to_json()
+                                                                            };
+                                                                            JeHandshakeResponse {
+                                                                                json: json
+                                                                            }.write_to_stream(&mut je_client).await;
                                                                         },
                                                                         1 => {
                                                                             // pong
-                                                                            if let Ok(data) = parse_je_data(packet_data.len(), &packet_data, &[
-                                                                                JeNetType::Long
-                                                                            ]) {
-                                                                                if let JeNetVal::Long(ping) = data[0] {
-                                                                                    write_to_je(&mut je_client, 0x1, &[
-                                                                                        JeNetVal::Long(ping)
-                                                                                    ]).await;
-                                                                                    run = false;
-                                                                                }
+                                                                            if let Ok(ping) = JePacketPing::try_from_raw(&packet_data) {
+                                                                                JePacketPong {
+                                                                                    val: ping.val
+                                                                                }.write_to_stream(&mut je_client).await;
                                                                             } else {
                                                                                 debug!("invalid ping packet");
                                                                             }
@@ -154,34 +221,40 @@ impl NetServer {
                                                                             let vtoken = vec![0u8, 1u8, 2u8, 3u8];
                                                                             // send enc request
                                                                             debug!("Sending enc request");
-                                                                            write_to_je(&mut je_client, 0x01, &[
-                                                                                JeNetVal::String("".to_owned()),
-                                                                                JeNetVal::VarInt(pubkey.len() as i32),
-                                                                                JeNetVal::Array(pubkey),
-                                                                                JeNetVal::VarInt(vtoken.len() as i32),
-                                                                                JeNetVal::Array(vtoken.clone())
-                                                                            ]).await;
+                                                                            JeEncRequest {
+                                                                                server_id: "".to_owned(),
+                                                                                pubkey_len: JeVarInt(pubkey.len() as i32),
+                                                                                pubkey: pubkey,
+                                                                                vtoken_len: JeVarInt(vtoken.len() as i32),
+                                                                                vtoken: vtoken.clone()
+                                                                            }.write_to_stream(&mut je_client).await;
                                                                         } else {
-                                                                            debug!("@{} OFFLINE MODE LOGIN", &addr);
-                                                                            debug!("sending login success");
-                                                                            write_to_je(&mut je_client, 0x02, &[
-                                                                                JeNetVal::String("550e8400-e29b-41d4-a716-446655440000".to_owned()),
-                                                                                JeNetVal::String(pk_login_start.name.clone())
-                                                                            ]).await;
-                                                                            state = 3;
-                                                                            let new_conn = JeConnection {
-                                                                                state: state,
-                                                                                enc: None,
-                                                                                uuid: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
-                                                                                addr: addr.clone(),
-                                                                                username: pk_login_start.name.clone(),
-                                                                                send: send_to_session
-                                                                            };
-                                                                            send_new_conn.send(new_conn.clone());
-                                                                            conn = Some(new_conn);
+                                                                            if let Ok(offline_user) = sp.users.load_or_new_offline(&pk_login_start.name) {
+                                                                                JeLoginSuccess {
+                                                                                    uuid: offline_user.uuid.clone().to_hyphenated().to_string(),
+                                                                                    username: offline_user.username.clone()
+                                                                                }.write_to_stream(&mut je_client).await;
+                                                                                state = 3;
+                                                                                
+                                                                                let new_conn = JeConnection {
+                                                                                    state: state,
+                                                                                    enc: None,
+                                                                                    uuid: offline_user.uuid.clone(),
+                                                                                    addr: addr.clone(),
+                                                                                    username: pk_login_start.name.clone(),
+                                                                                    send: send_to_session,
+                                                                                    online: false
+                                                                                };
+                                                                                send_new_conn.send(new_conn.clone());
+                                                                                conn = Some(new_conn);
+                                                                            } else {
+                                                                                // failed to get offline user info, shutdown
+                                                                                error!("Failed to load or create offline user record, terminating connection");
+                                                                                run = false;
+                                                                            }
 
                                                                             // join game
-                                                                            write_to_je(&mut je_client, 0x26, &[
+                                                                            /*write_to_je(&mut je_client, 0x26, &[
                                                                                 JeNetVal::Int(0x01000000),  // eid
                                                                                 JeNetVal::UByte(0x1),       // gamemode
                                                                                 JeNetVal::Int(0),           // dimension
@@ -227,7 +300,7 @@ impl NetServer {
                                                                                 JeNetVal::Float(0.0f32),
                                                                                 JeNetVal::UByte(0),
                                                                                 JeNetVal::VarInt(1)
-                                                                            ]).await;
+                                                                            ]).await;*/
                                                                         }
                                                                     } else {
                                                                         debug!("DE login start err");
@@ -273,6 +346,9 @@ impl NetServer {
                     drop(Box::from_raw(
                         std::mem::transmute::<_, *mut ConfigCollection>(cc)
                     ));
+                    drop(Box::from_raw(
+                        std::mem::transmute::<_, *mut ServerPrefix>(sp)
+                    ));
                 }
             });
         });
@@ -290,14 +366,14 @@ impl NetServer {
             packet_id, data.to_owned()
         ));
     }
-    pub fn broadcast(&mut self, packet_id: i32, to: &[Uuid], data: &[u8]) {
+    pub fn broadcast<T: JePacket>(&mut self, to: &[Uuid], packet: T) {
         self.ani_send.send(NetSendMsg::Broadcast(
-            to.to_owned(), packet_id, data.to_owned()
+            to.to_owned(), packet.get_packet_id().0, packet.to_vec_u8()
         ));
     }
-    pub fn single(&mut self, packet_id: i32, to: &Uuid, data: &[u8]) {
+    pub fn single<T: JePacket>(&mut self, to: &Uuid, packet: T) {
         self.ani_send.send(NetSendMsg::Single(
-            to.to_owned(), packet_id, data.to_owned()
+            to.to_owned(), packet.get_packet_id().0, packet.to_vec_u8()
         ));
     }
     pub fn disconnect(&mut self, to: &Uuid, msg: &str) {

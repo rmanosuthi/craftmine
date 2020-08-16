@@ -218,3 +218,13 @@ pub fn get_logger(start_inst: Instant) {
         }, r.args())
     }).init();
 }
+
+#[cfg(debug_assertions)]
+pub const SERVER_RELNAME: &'static str = {
+    concat!(env!("CARGO_PKG_VERSION"), "-", "DEBUG")
+};
+
+#[cfg(not(debug_assertions))]
+pub const SERVER_RELNAME: &'static str = {
+    concat!(env!("CARGO_PKG_VERSION"), "-", "RELEASE")
+};

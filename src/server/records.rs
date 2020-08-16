@@ -7,7 +7,8 @@ pub struct UserRecord {
     pub username: String,
     pub world: String,
     pub locality: LocalityRecord,
-    pub uuid: Uuid
+    pub uuid: Uuid,
+    pub online: bool
 }
 
 impl Default for UserRecord {
@@ -16,7 +17,8 @@ impl Default for UserRecord {
             username: "".to_owned(),
             world: "overworld".to_owned(),
             locality: LocalityRecord::default(),
-            uuid: Uuid::default()
+            uuid: Uuid::default(),
+            online: false
         }
     }
 }

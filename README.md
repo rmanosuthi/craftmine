@@ -1,6 +1,6 @@
 # CraftMine
 
-CraftMine was started as an experiment in \textbf{the whole process} of designing a complex system, and Rust was the natural choice.
+CraftMine was started as an experiment in **the whole process** of designing a complex system, and Rust was the natural choice.
 
 Its main goals are to:
 - Fully utilize modern hardware using concurrency and parallelism

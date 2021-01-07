@@ -18,8 +18,8 @@ pub struct NetServer {
 pub struct ServerJsonStatus {
     pub server_name: String,
     pub server_protocol: u16,
-    pub online_players: u64,
-    pub max_players: u64,
+    pub online_players: u8,
+    pub max_players: u8,
     pub desc: String,
     pub favicon: String
 }
@@ -36,7 +36,7 @@ impl ServerJsonStatus {
         }
     }
     pub fn to_json(&self) -> String {
-        let mut result = serde_json::to_string(&serde_json::json!({
+        let mut result = serde_json::to_string_pretty(&serde_json::json!({
             "version": {
                 "name": self.server_name,
                 "protocol": self.server_protocol
@@ -229,7 +229,7 @@ impl NetServer {
                                                                                 vtoken: vtoken.clone()
                                                                             }.write_to_stream(&mut je_client).await;
                                                                         } else {
-                                                                            if let Ok(offline_user) = sp.users.load_or_new_offline(&pk_login_start.name) {
+                                                                            if let Ok(offline_user) = sp.users.load_or_new_offline(&pk_login_start.name, &cc) {
                                                                                 JeLoginSuccess {
                                                                                     uuid: offline_user.uuid.clone().to_hyphenated().to_string(),
                                                                                     username: offline_user.username.clone()

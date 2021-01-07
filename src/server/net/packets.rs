@@ -14,6 +14,11 @@ pub trait JePacket: Sized {
     }
 }
 
+pub struct JeGenericPacket {
+    pub id: i32,
+    pub data: Vec<u8>
+}
+
 /// Make a struct a packet.
 /// Field types must implement `JeType` and `Default` and end with a `,` in the declaration.
 macro_rules! declare_packet {
@@ -54,6 +59,11 @@ macro_rules! declare_packet {
                     }
                 )*
                 result
+            }
+        }
+        impl std::convert::From<$name> for JeGenericPacket {
+            fn from(input: $name) -> Self {
+                unimplemented!()
             }
         }
     };

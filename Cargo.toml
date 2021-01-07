@@ -26,6 +26,7 @@ ring = "0.16"
 openssl = "*"
 ctrlc = "*"
 async-trait = "0.1"
+hematite-nbt = "0.5"
 
 [features]
 web = []

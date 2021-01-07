@@ -26,6 +26,9 @@ pub trait ConfigValidator {
     fn validate(&self) -> Vec<ValidatorInfo>;
 }
 
+/// Collection of configs used in the server.
+/// A restart is required for the changes to take effect,
+/// the reason being access is frequent and synchronization incurs too much performance penalty.
 #[derive(Clone)]
 pub struct ConfigCollection {
     pub auth: ConfigAuth,

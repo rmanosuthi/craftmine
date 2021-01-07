@@ -1,4 +1,7 @@
+use std::ops::Deref;
+
 mod auth;
+mod io;
 
 mod net {
     mod je;
@@ -24,7 +27,9 @@ mod world {
 }
 
 mod game {
+    mod mode;
     mod server;
+    pub use self::mode::*;
     pub use self::server::*;
 }
 
@@ -50,3 +55,50 @@ mod config;
 mod records;
 
 pub mod log;
+
+/// A type which contains data loaded from the program memory.
+/// The name is slightly misleading and is only a weak guarantee; `Live` does *not* take ownership.
+/// It's only meant to be used in a function signature, and can be an out-of-sync clone of the actual object.
+pub struct Live<T: Clone> {
+    inner: T
+}
+
+impl<T: Clone> Live<T> {
+    pub fn snapshot(&self) -> Snapshot<T> {
+        Snapshot {inner: self.inner.clone()}
+    }
+}
+
+impl<T: Clone> From<T> for Live<T> {
+    fn from(t: T) -> Live<T> {
+        Live {inner: t}
+    }
+}
+
+impl<T: Clone> Deref for Live<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+/// A type which contains data loaded from the the disk, or a copy of `Live<T>`.
+/// It's only meant to be used in a function signature, and can be an out-of-sync clone of the actual object.
+pub struct Snapshot<T> {
+    inner: T
+}
+
+impl<T> Deref for Snapshot<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> From<T> for Snapshot<T> {
+    fn from(t: T) -> Snapshot<T> {
+        Snapshot {inner: t}
+    }
+}

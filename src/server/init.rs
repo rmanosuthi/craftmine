@@ -118,7 +118,9 @@ impl ServerInitializer {
                     cc,
                     recv_status: recv_status_to_gs,
                     send_status: status_from_gs,
-                    users: HashMap::new()
+                    users: HashMap::new(),
+                    last_tick: Instant::now(),
+                    puid: PersistUuidAllocator::new(pfx_io_admin.new_client("puid"))
                 };
                 ServerInitResult {
                     instance: if errs.is_empty() {

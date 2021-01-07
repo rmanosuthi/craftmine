@@ -1,6 +1,8 @@
 use crate::imports::*;
 use crate::server::symbols::*;
 
+use super::Snapshot;
+
 #[derive(Debug, Clone)]
 pub struct ServerPrefix {
     pub path: PathBuf,
@@ -9,25 +11,37 @@ pub struct ServerPrefix {
 }
 
 impl UserPrefix {
-    pub fn load_or_new_online(&self, uuid: &Uuid, username: &str) -> Result<UserRecord, ()> {
+    pub fn load_or_new_online(&self, uuid: &Uuid, username: &str, cc: &ConfigCollection, puid: &mut PersistUuidAllocator, default_w_props: &WorldProperty) -> Result<UserRecord, ()> {
         let mut path = self.0.clone();
-        let mut def = UserRecord::default();
-        def.uuid = uuid.to_owned();
-        def.username = username.to_owned();
-        def.online = true;
         path.push(format!(
             "{}.json",
             uuid.to_string()
         ));
-        UserRecord::load_or_new(&path, def)
+        let world_name = cc.auth.default_world_name.to_owned();
+        UserRecord::load_or_new(&path, UserRecord {
+            username: username.to_owned(),
+            world: world_name.clone(),
+            locality: default_w_props.default_spawn,
+            uuid: Some(uuid.to_owned()),
+            online: true,
+            gamemode: default_w_props.default_gamemode,
+            persist_id: puid.new_online_user(&uuid)
+        })
     }
-    pub fn load_or_new_offline(&self, username: &str) -> Result<UserRecord, ()> {
+    pub fn load_or_new_offline(&self, username: &str, cc: &ConfigCollection, puid: &mut PersistUuidAllocator, default_w_props: &WorldProperty) -> Result<UserRecord, ()> {
         let mut path = self.0.clone();
-        let mut def = UserRecord::default();
-        def.uuid = Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, username.as_bytes());
-        def.username = username.to_owned();
-        def.online = false;
-        warn!("Offline user {} has a UUID (v5, namespace OID, SHA-1 of username) of {}", username, &def.uuid);
+        
+        let world_name = cc.auth.default_world_name;
+        let mut def = UserRecord {
+            username: username.to_owned(),
+            world: world_name.clone(),
+            locality: default_w_props.default_spawn,
+            uuid: None,
+            online: true,
+            gamemode: default_w_props.default_gamemode,
+            persist_id: puid.new_offline_user(&username)
+        };
+        warn!("Offline user {} has a persist UUID (v5, namespace OID, SHA-1 of username) of {}", username, &def.uuid);
         path.push(format!(
             "{}.json",
             def.uuid.to_string()
@@ -77,6 +91,13 @@ impl UserPrefix {
         path.push("users");
         Self(path)
     }
+    pub fn online_path(&self) -> PathBuf {
+        [self.0, "online".into()].iter().collect()
+    }
+
+    pub fn offline_path(&self) -> PathBuf {
+        [self.0, "offline".into()].iter().collect()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -87,6 +108,13 @@ impl WorldPrefix {
         let mut path = p.to_owned();
         path.push("worlds");
         Self(path)
+    }
+    pub fn snapshot_props(&self) -> Snapshot<WorldProperty> {
+        unimplemented!()
+    }
+    /// Get the **on-disk properties** of a world.
+    pub fn snapshot_name(world_name: &str) -> Option<Snapshot<WorldProperty>> {
+        unimplemented!()
     }
 }
 

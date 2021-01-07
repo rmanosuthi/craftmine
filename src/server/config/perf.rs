@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ConfigPerf {
-    pub view_distance_chunks: u64,
+    pub view_distance_chunks: u16,
     pub items_dropped_ttl: Duration,
     pub chunks_active_enable: bool,
     pub chunks_active_max: Option<u64>,
@@ -28,7 +28,6 @@ impl Default for ConfigPerf {
             chunks_pools: ConfigChunkPools::default(),
             target_tick_s_f64: 0.05f64,
             cg_causality_map: [
-                (BlockId(0, 0), 0)
             ].iter().map(|e| *e).collect()
         }
     }

@@ -5,7 +5,7 @@ use crate::init_flags::*;
 pub struct WorldFolder {}
 impl WorldFolder {
     // TODO actually implement
-    pub fn load_or_default(vf: &ValidatedInitFlags) -> Result<HashMap<Uuid, World>, Vec<String>> {
+    pub fn load_or_default(vf: &ValidatedInitFlags) -> Result<HashMap<String, World>, Vec<String>> {
         Ok(HashMap::new())
     }
 }
